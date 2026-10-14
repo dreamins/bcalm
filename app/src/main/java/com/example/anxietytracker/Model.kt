@@ -46,16 +46,20 @@ data class Entry(
     val hourOfDay: Float get() = dateTime.let { it.hour + it.minute / 60f }
 }
 
+/** Stored/CSV form (lowercase, keep stable). */
 val PARTNER_LABELS = listOf("good", "neutral", "tense")
+
+/** Display form used in the UI. */
+val PARTNER_DISPLAY = listOf("Good", "Neutral", "Tense")
 
 fun fmtMin(m: Int) = "%02d:%02d".format(m / 60, m % 60)
 
 fun Entry.summary(): String {
-    fun yn(b: Boolean?) = when (b) { true -> "yes"; false -> "no"; null -> "-" }
+    fun yn(b: Boolean?) = when (b) { true -> "Yes"; false -> "No"; null -> "-" }
     return buildString {
         append("Anxiety ${anxiety ?: "-"}")
         append("  Caf ${yn(caffeine)}  Food ${yn(food)}  Ex ${yn(exercise)}")
-        append("\nPartner ${partner?.let { PARTNER_LABELS[it] } ?: "-"}")
+        append("\nPartner ${partner?.let { PARTNER_DISPLAY[it] } ?: "-"}")
         append("  Wake ${wakeMin?.let { fmtMin(it) } ?: "-"}  Sleep ${sleep ?: "-"}")
         if (medDose != null || medTime != null)
             append("\nMed ${medDose ?: "-"} ${medTime?.let { fmtMin(it) } ?: ""}")

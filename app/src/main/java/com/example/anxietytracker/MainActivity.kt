@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -21,12 +22,13 @@ import java.io.File
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         Store.init(this)
         Reminders.schedule(this, Store.intervalHours, replace = false)
         setContent {
             val dark = isSystemInDarkTheme()
             val ctx = LocalContext.current
-            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+            BcalmTheme(dark) {
                 val launcher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission()) { }
                 LaunchedEffect(Unit) {
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val vm: MainViewModel = viewModel()
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
+                LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onAppStopped() }
                 AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0))
             }
         }

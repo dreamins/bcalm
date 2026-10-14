@@ -55,6 +55,15 @@ object Store {
             .putLong("sleepDay", d.sleepDay).apply()
     }
 
+    // ---- "Today" card open/closed choice (valid for the day it was made) ----
+    fun loadTodayOpen(): Boolean? =
+        if (prefs.getLong("todayOpenDay", -1L) == today() && prefs.contains("todayOpen"))
+            prefs.getBoolean("todayOpen", false) else null
+
+    fun saveTodayOpen(open: Boolean) {
+        prefs.edit().putLong("todayOpenDay", today()).putBoolean("todayOpen", open).apply()
+    }
+
     // ---- settings ----
     var intervalHours: Int
         get() = prefs.getInt("intervalHours", 3)
@@ -143,6 +152,15 @@ object Store {
     @Synchronized
     fun add(e: Entry) {
         _entries.value = (_entries.value + e).sortedBy { it.ts }
+        writeFile()
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    /** Replaces the entry with the same timestamp (no-op if it no longer exists). */
+    @Synchronized
+    fun update(e: Entry) {
+        if (_entries.value.none { it.ts == e.ts }) return
+        _entries.value = _entries.value.map { if (it.ts == e.ts) e else it }
         writeFile()
         CsvSync.enqueueIfEnabled(appCtx)
     }
