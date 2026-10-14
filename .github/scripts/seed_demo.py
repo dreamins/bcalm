@@ -67,7 +67,7 @@ prefs = [
     ("long", "exerciseDay", today), ("int", "partner", 1),
     ("int", "wakeMin", 420), ("long", "wakeDay", today),
     ("int", "sleep", 3), ("long", "sleepDay", today),
-    ("string", "medDose", "10 mg"), ("int", "medTime", 465), ("long", "medDay", today),
+    ("string", "medCurrentDose", "10 mg"), ("int", "medUsualTime", 480),
     ("int", "intervalHours", 3),
     ("string", "medName", ""),
     ("string", "doses", "5 mg\n10 mg\n20 mg"),

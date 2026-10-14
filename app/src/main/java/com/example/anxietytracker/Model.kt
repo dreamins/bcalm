@@ -18,17 +18,12 @@ data class Draft(
     val wakeDay: Long = 0,
     val sleep: Int? = null,
     val sleepDay: Long = 0,
-    val medDose: String? = null,
-    val medTime: Int? = null,   // minutes since midnight
-    val medDay: Long = 0,
 ) {
     /** Daily fields whose last-set date isn't today show as unset. */
     fun normalized(today: Long = LocalDate.now().toEpochDay()): Draft = copy(
         exercise = if (exerciseDay == today) exercise else null,
         wakeMin = if (wakeDay == today) wakeMin else null,
         sleep = if (sleepDay == today) sleep else null,
-        medDose = if (medDay == today) medDose else null,
-        medTime = if (medDay == today) medTime else null,
     )
 }
 

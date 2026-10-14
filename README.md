@@ -11,7 +11,8 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 ## Features
 
 - **One-tap save.** Every field carries over from your last entry, so logging is usually a single tap.
-- **Daily fields reset at midnight:** wake time, sleep quality, medication dose/time and exercise.
+- **Daily fields reset at midnight:** wake time, sleep quality and exercise.
+- **Medication is set once in Settings** (optional name, current dose, usual time) and recorded automatically with every entry.
 - **Cause chips** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Chart** of anxiety versus time of day, plus per-cause statistics.

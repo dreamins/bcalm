@@ -41,8 +41,6 @@ object Store {
             partner = i("partner"),
             wakeMin = i("wakeMin"), wakeDay = prefs.getLong("wakeDay", 0),
             sleep = i("sleep"), sleepDay = prefs.getLong("sleepDay", 0),
-            medDose = prefs.getString("medDose", null), medTime = i("medTime"),
-            medDay = prefs.getLong("medDay", 0),
         ).normalized()
     }
 
@@ -53,10 +51,8 @@ object Store {
         put("food", d.food?.let { if (it) 1 else 0 })
         put("exercise", d.exercise?.let { if (it) 1 else 0 })
         put("partner", d.partner); put("wakeMin", d.wakeMin); put("sleep", d.sleep)
-        put("medTime", d.medTime)
         e.putLong("exerciseDay", d.exerciseDay).putLong("wakeDay", d.wakeDay)
-            .putLong("sleepDay", d.sleepDay).putLong("medDay", d.medDay)
-            .putString("medDose", d.medDose).apply()
+            .putLong("sleepDay", d.sleepDay).apply()
     }
 
     // ---- settings ----
@@ -90,6 +86,15 @@ object Store {
         get() = prefs.getString("medName", "") ?: ""
         set(v) { prefs.edit().putString("medName", clean(v)).apply() }
 
+    /** Current dose (null = none); changes rarely, recorded with every entry. */
+    var medCurrentDose: String?
+        get() = prefs.getString("medCurrentDose", null)?.ifBlank { null }
+        set(v) { prefs.edit().apply { if (v.isNullOrBlank()) remove("medCurrentDose") else putString("medCurrentDose", v) }.apply() }
+    /** Usual time taken, minutes since midnight (null = none). */
+    var medUsualTime: Int?
+        get() = if (prefs.contains("medUsualTime")) prefs.getInt("medUsualTime", 0) else null
+        set(v) { prefs.edit().apply { if (v == null) remove("medUsualTime") else putInt("medUsualTime", v) }.apply() }
+
     private val _doses = MutableStateFlow<List<String>>(emptyList())
     val doses: StateFlow<List<String>> = _doses
     private fun loadDoses() {
@@ -103,7 +108,10 @@ object Store {
         val n = clean(name)
         if (n.isNotEmpty() && _doses.value.none { it.equals(n, true) }) saveDoses(_doses.value + n)
     }
-    fun removeDose(name: String) = saveDoses(_doses.value - name)
+    fun removeDose(name: String) {
+        saveDoses(_doses.value - name)
+        if (medCurrentDose == name) medCurrentDose = null
+    }
     private fun clean(s: String) = s.trim().replace(Regex("[;|,\n]"), " ").take(30)
 
     // ---- causes list (presets + custom; user can remove any) ----
@@ -129,7 +137,7 @@ object Store {
     // ---- entries ----
     fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis()): Entry {
         val n = d.normalized()
-        return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes, n.medDose, n.medTime)
+        return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes, medCurrentDose, medUsualTime)
     }
 
     @Synchronized

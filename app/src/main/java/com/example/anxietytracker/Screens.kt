@@ -68,7 +68,6 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val entries by vm.entries.collectAsStateWithLifecycle()
     val causes by vm.causeList.collectAsStateWithLifecycle()
     val sel by vm.selectedCauses.collectAsStateWithLifecycle()
-    val doses by vm.doses.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -101,7 +100,6 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 }
             }
             WakeRow(d.wakeMin) { vm.setWake(it) }
-            MedRow(doses, d.medDose, d.medTime, vm)
             Label("Sleep quality (today)")
             NumberChips(1..5, d.sleep, perRow = 5) { vm.setSleep(it) }
         }
@@ -189,31 +187,6 @@ fun TimeDialog(initial: Int?, onDismiss: () -> Unit, onOk: (Int) -> Unit) {
         confirmButton = { TextButton(onClick = { onOk(st.hour * 60 + st.minute) }) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         text = { TimePicker(state = st) })
-}
-
-@Composable
-fun MedRow(doses: List<String>, dose: String?, time: Int?, vm: MainViewModel) {
-    val label = Store.medName.ifBlank { "Medication" }
-    var show by remember { mutableStateOf(false) }
-    if (doses.isEmpty()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, Modifier.width(110.dp))
-            Text("Add your dose in Settings", style = MaterialTheme.typography.bodySmall)
-        }
-    } else {
-        FlowRow(verticalArrangement = Arrangement.spacedBy(0.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label)
-            doses.forEach { dz ->
-                FilterChip(selected = dose == dz, onClick = { vm.setMedDose(if (dose == dz) null else dz) },
-                    label = { Text(dz) })
-            }
-            AssistChip(onClick = { show = true }, label = { Text(time?.let { fmtMin(it) } ?: "Time") })
-            AssistChip(onClick = { val t = java.time.LocalTime.now(); vm.setMedTime(t.hour * 60 + t.minute) },
-                label = { Text("Now") })
-            if (time != null) AssistChip(onClick = { vm.setMedTime(null) }, label = { Text("Clear") })
-        }
-    }
-    if (show) TimeDialog(time, { show = false }) { vm.setMedTime(it); show = false }
 }
 
 @Composable
@@ -347,6 +320,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     var hours by remember { mutableIntStateOf(Store.intervalHours) }
     val doses by vm.doses.collectAsStateWithLifecycle()
     var medName by remember { mutableStateOf(Store.medName) }
+    var curDose by remember { mutableStateOf(Store.medCurrentDose) }
+    var usualTime by remember { mutableStateOf(Store.medUsualTime) }
+    var showTime by remember { mutableStateOf(false) }
     var addDose by remember { mutableStateOf(false) }
     var rmDose by remember { mutableStateOf<String?>(null) }
     val syncUri by Store.syncUri.collectAsStateWithLifecycle()
@@ -368,15 +344,25 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         HorizontalDivider()
         Text("Medication", style = MaterialTheme.typography.titleSmall)
         OutlinedTextField(value = medName, onValueChange = { medName = it.take(30); Store.medName = medName },
-            label = { Text("Name (optional, used as row label)") }, singleLine = true,
+            label = { Text("Name (optional)") }, singleLine = true,
             modifier = Modifier.fillMaxWidth())
-        Text("Doses (long-press to remove)", style = MaterialTheme.typography.bodySmall)
+        Text("Current dose (tap to select, tap again to clear, long-press to remove)", style = MaterialTheme.typography.bodySmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             doses.forEach { dz ->
-                AssistChip(onClick = {}, label = { Text(dz) },
-                    modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { rmDose = dz }))
+                FilterChip(selected = curDose == dz,
+                    onClick = { curDose = if (curDose == dz) null else dz; Store.medCurrentDose = curDose },
+                    label = { Text(dz) },
+                    modifier = Modifier.combinedClickable(onClick = {
+                        curDose = if (curDose == dz) null else dz; Store.medCurrentDose = curDose
+                    }, onLongClick = { rmDose = dz }))
             }
             AssistChip(onClick = { addDose = true }, label = { Text("+ Add dose") })
+        }
+        Text("Usual time", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            AssistChip(onClick = { showTime = true }, label = { Text(usualTime?.let { fmtMin(it) } ?: "Set time") })
+            if (usualTime != null) AssistChip(onClick = { usualTime = null; Store.medUsualTime = null },
+                label = { Text("Clear") })
         }
         HorizontalDivider()
         Text("Sync to Google Drive", style = MaterialTheme.typography.titleSmall)
@@ -409,6 +395,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         Button(onClick = onExport, Modifier.fillMaxWidth()) { Text("Export CSV") }
     }
 
+    if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {
+        usualTime = it; Store.medUsualTime = it; showTime = false
+    }
     if (addDose) {
         var text by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest = { addDose = false },
@@ -421,7 +410,7 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     rmDose?.let { dz ->
         AlertDialog(onDismissRequest = { rmDose = null },
             title = { Text("Remove \"$dz\"?") },
-            confirmButton = { TextButton(onClick = { Store.removeDose(dz); rmDose = null }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { Store.removeDose(dz); if (curDose == dz) curDose = null; rmDose = null }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { rmDose = null }) { Text("Keep") } })
     }
 }

@@ -31,14 +31,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setWake(v: Int?) = update { it.copy(wakeMin = v, wakeDay = Store.today()) }
     fun setSleep(v: Int?) = update { it.copy(sleep = v, sleepDay = Store.today()) }
 
-    fun setMedDose(v: String?) = update {
-        // one-tap logging: choosing a dose with no time yet fills in the current time
-        val t = java.time.LocalTime.now()
-        it.copy(medDose = v, medDay = Store.today(),
-            medTime = if (v != null && it.medTime == null) t.hour * 60 + t.minute else it.medTime)
-    }
-    fun setMedTime(v: Int?) = update { it.copy(medTime = v, medDay = Store.today()) }
-
     fun toggleCause(c: String) { _causes.value = _causes.value.let { if (c in it) it - c else it + c } }
     fun addCause(c: String) { Store.addCause(c); _causes.value = _causes.value + c.trim().replace(Regex("[;|,\n]"), " ").take(30) }
     fun removeCause(c: String) { Store.removeCause(c); _causes.value = _causes.value - c }
