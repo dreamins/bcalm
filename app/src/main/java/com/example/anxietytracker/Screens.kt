@@ -2,6 +2,8 @@
 
 package com.example.anxietytracker
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -30,8 +32,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -345,6 +349,11 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     var medName by remember { mutableStateOf(Store.medName) }
     var addDose by remember { mutableStateOf(false) }
     var rmDose by remember { mutableStateOf<String?>(null) }
+    val syncUri by Store.syncUri.collectAsStateWithLifecycle()
+    val syncState by Store.syncState.collectAsStateWithLifecycle()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) CsvSync.setTarget(ctx, uri)
+    }
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Reminder interval (08:00-22:00)", style = MaterialTheme.typography.titleSmall)
@@ -368,6 +377,33 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                     modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { rmDose = dz }))
             }
             AssistChip(onClick = { addDose = true }, label = { Text("+ Add dose") })
+        }
+        HorizontalDivider()
+        Text("Sync to Google Drive", style = MaterialTheme.typography.titleSmall)
+        val target = syncUri
+        if (target == null) {
+            Text("Pick a folder in Google Drive in the system file picker. The CSV is rewritten there after every change.",
+                style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { picker.launch("bcalm.csv") }, Modifier.fillMaxWidth()) { Text("Choose file\u2026") }
+        } else {
+            val name by produceState("selected file", target) {
+                value = withContext(Dispatchers.IO) { CsvSync.displayName(ctx, target) }
+            }
+            val fmt = remember { java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm") }
+            Text("Target: $name", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (syncState.message.isEmpty()) "Not synced yet" else {
+                    val at = java.time.LocalDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(syncState.time), ZoneId.systemDefault())
+                    "Last sync: ${at.format(fmt)} \u2014 ${syncState.message}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (syncState.message.startsWith("Failed")) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { CsvSync.enqueue(ctx) }) { Text("Sync now") }
+                OutlinedButton(onClick = { CsvSync.stop(ctx) }) { Text("Stop syncing") }
+            }
         }
         HorizontalDivider()
         Button(onClick = onExport, Modifier.fillMaxWidth()) { Text("Export CSV") }

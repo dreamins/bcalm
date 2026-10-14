@@ -7,10 +7,13 @@ import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.time.LocalDate
 
+data class SyncState(val time: Long, val message: String)
+
 /** Draft + settings in SharedPreferences; entries in a simple line file. */
 object Store {
     private lateinit var prefs: SharedPreferences
     private lateinit var file: File
+    private lateinit var appCtx: Context
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     val entries: StateFlow<List<Entry>> = _entries
 
@@ -18,11 +21,14 @@ object Store {
     fun init(ctx: Context) {
         if (::prefs.isInitialized) return
         val app = ctx.applicationContext
+        appCtx = app
         prefs = app.getSharedPreferences("draft", Context.MODE_PRIVATE)
         file = File(app.filesDir, "entries.txt")
         _entries.value = readFile()
         loadCauses()
         loadDoses()
+        _syncUri.value = prefs.getString("syncUri", null)
+        _syncState.value = SyncState(prefs.getLong("syncTime", 0L), prefs.getString("syncMsg", "") ?: "")
     }
 
     // ---- draft ----
@@ -57,6 +63,27 @@ object Store {
     var intervalHours: Int
         get() = prefs.getInt("intervalHours", 3)
         set(v) { prefs.edit().putInt("intervalHours", v).apply() }
+
+    // ---- Drive/CSV sync target (a SAF document uri) and last result ----
+    private val _syncUri = MutableStateFlow<String?>(null)
+    val syncUri: StateFlow<String?> = _syncUri
+    private val _syncState = MutableStateFlow(SyncState(0L, ""))
+    val syncState: StateFlow<SyncState> = _syncState
+
+    fun setSyncUri(uri: String?) {
+        _syncUri.value = uri
+        val e = prefs.edit()
+        if (uri == null) e.remove("syncUri") else e.putString("syncUri", uri)
+        e.apply()
+        setSyncResult("")
+    }
+
+    /** Records the outcome of the latest sync attempt (empty message = nothing synced yet). */
+    fun setSyncResult(msg: String) {
+        val st = SyncState(if (msg.isEmpty()) 0L else System.currentTimeMillis(), msg)
+        _syncState.value = st
+        prefs.edit().putLong("syncTime", st.time).putString("syncMsg", st.message).apply()
+    }
 
     // ---- medication settings (set once in Settings) ----
     var medName: String
@@ -109,12 +136,14 @@ object Store {
     fun add(e: Entry) {
         _entries.value = (_entries.value + e).sortedBy { it.ts }
         writeFile()
+        CsvSync.enqueueIfEnabled(appCtx)
     }
 
     @Synchronized
     fun delete(e: Entry) {
         _entries.value = _entries.value.filter { it.ts != e.ts }
         writeFile()
+        CsvSync.enqueueIfEnabled(appCtx)
     }
 
     /** Saves the carried-over draft as a new entry and clears any reminder. */
