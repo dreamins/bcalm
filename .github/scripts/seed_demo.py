@@ -23,7 +23,7 @@ causes_pool = ["Work", "Deadline", "News/phone", "Money", "Social", "Conflict", 
 
 def anxiety_at(h):
     base = 2.5 + 2.5 * (1 if 9 <= h <= 11 else 0) + 3.0 * (1 if 14 <= h <= 17 else 0) + 1.0 * (1 if h >= 20 else 0)
-    return max(0, min(10, round(base + random.gauss(0, 1.2))))
+    return max(1, min(10, round(base + random.gauss(0, 1.2))))
 
 
 lines = []

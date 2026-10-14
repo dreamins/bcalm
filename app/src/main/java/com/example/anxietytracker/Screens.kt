@@ -289,7 +289,7 @@ fun AnxietyChart(data: List<Entry>, modifier: Modifier) {
             drawText(m, topLeft = Offset(x(hr.toFloat()) - m.size.width / 2f, t + h + 4.dp.toPx()))
         }
         drawRect(axis, Offset(l, t), androidx.compose.ui.geometry.Size(w, h), style = Stroke(1.dp.toPx()))
-        data.forEach { e -> drawCircle(dot, 4.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.toFloat()))) }
+        data.forEach { e -> drawCircle(dot, 4.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.coerceIn(1, 10).toFloat()))) }
         val avgs = (0..23).mapNotNull { hr ->
             val xs = data.filter { it.dateTime.hour == hr }.map { it.anxiety!! }
             if (xs.isEmpty()) null else Offset(x(hr + 0.5f), y(xs.average().toFloat()))
