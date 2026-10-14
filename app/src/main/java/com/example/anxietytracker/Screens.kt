@@ -34,8 +34,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -44,6 +42,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -164,6 +163,8 @@ fun Segmented(
                 Text(label, maxLines = 1, fontSize = textSize.sp,
                     fontWeight = if (isHint) FontWeight.Bold else FontWeight.Normal,
                     color = if (sel) cs.onPrimary else if (isHint) cs.primary else cs.onSurface)
+                if (isHint) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp)
+                    .width(16.dp).height(2.dp).background(cs.primary))
             }
         }
     }
@@ -378,9 +379,13 @@ fun TimeDialog(initial: Int?, onDismiss: () -> Unit, onOk: (Int) -> Unit) {
 fun ChartScreen(vm: MainViewModel) {
     val all by vm.entries.collectAsStateWithLifecycle()
     var range by remember { mutableIntStateOf(30) }  // 7, 30, 0 = all
-    val cutoff = if (range == 0) 0L else
-        LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val data = all.filter { it.anxiety != null && it.ts >= cutoff }
+    val data = remember(all, range) {
+        val cutoff = if (range == 0) 0L else
+            LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        all.filter { it.anxiety != null && it.ts >= cutoff }
+    }
+    val ins = remember(data) { computeInsights(data) }
+    val cs = MaterialTheme.colorScheme
     val ranges = listOf(7, 30, 0)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -388,100 +393,178 @@ fun ChartScreen(vm: MainViewModel) {
         Segmented(listOf("7 days", "30 days", "All"), ranges.indexOf(range), allowClear = false) {
             if (it != null) range = ranges[it]
         }
-        AnxietyChart(data, Modifier.fillMaxWidth().height(300.dp))
-        Caption("${data.size} entries. Dots are entries; the line is the hourly average.")
-        val stats = data.flatMap { e -> e.causes.map { it to e.anxiety!! } }
-            .groupBy({ it.first }, { it.second })
-            .map { Triple(it.key, it.value.size, it.value.average()) }
-            .sortedByDescending { it.second }
-        if (stats.isNotEmpty()) {
-            SectionHeader("Common causes")
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            stats.forEach { (c, n, avg) ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text(c)
-                    Text("%d×  ·  avg %.1f".format(n, avg), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Text(ins.sentence, style = MaterialTheme.typography.bodyLarge)
+        if (ins.count > 0) Caption("${ins.count} entries · average ${"%.1f".format(ins.avg)}")
+        AnxietyChart(data, Modifier.fillMaxWidth().height(220.dp))
+        Caption("Hour of day. Bars are the hourly average; dots are single entries.")
+
+        if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
+            Spacer(Modifier.height(4.dp))
+            SectionHeader("Patterns")
+            Column {
+                HorizontalDivider(color = cs.outlineVariant)
+                ins.causes.forEach { PatternRow(it.label, "${it.n}×", it.diff) }
+                ins.factors.forEach { PatternRow(it.label, null, it.diff) }
             }
+            if (ins.otherCauses > 0) {
+                Caption(if (ins.otherCauses == 1) "1 other cause with too few entries"
+                        else "${ins.otherCauses} other causes with too few entries")
+            }
+            Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).")
         }
     }
 }
 
 @Composable
+private fun PatternRow(label: String, count: String?, diff: Double) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (count != null) Text(count, Modifier.padding(end = 16.dp),
+            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+        Text(fmtDiff(diff), Modifier.widthIn(min = 44.dp), textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+    }
+    HorizontalDivider(color = cs.outlineVariant)
+}
+
+/** Hourly mean bars (thin, accent at low alpha), faint dots for single entries, hairline baseline. */
+@Composable
 fun AnxietyChart(data: List<Entry>, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
-    val axis = MaterialTheme.colorScheme.outline
-    val dot = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-    val line = MaterialTheme.colorScheme.primary
-    val txt = MaterialTheme.colorScheme.onSurfaceVariant
+    val cs = MaterialTheme.colorScheme
+    val grid = cs.outlineVariant
+    val baseline = cs.outline
+    val dot = cs.onSurfaceVariant.copy(alpha = 0.5f)
+    val bar = cs.primary.copy(alpha = 0.45f)
+    val txt = cs.onSurfaceVariant
     Canvas(modifier) {
-        val l = 36.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
+        val l = 28.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
         val w = size.width - l - r; val h = size.height - t - b
-        fun x(hr: Float) = l + w * hr / 24f
-        fun y(a: Float) = t + h * (1 - (a - 1f) / 9f)
+        val hours = data.map { it.dateTime.hour }
+        val lo = (minOf(6, hours.minOrNull() ?: 6) / 3) * 3
+        val hi = minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
+        val span = (hi - lo).toFloat()
+        fun x(hr: Float) = l + w * (hr - lo) / span
+        fun y(a: Float) = t + h * (1 - a / 10f)   // baseline = 0, top = 10
         val style = TextStyle(color = txt, fontSize = 10.sp)
-        for (a in 1..10) {
-            drawLine(axis.copy(alpha = 0.3f), Offset(l, y(a.toFloat())), Offset(l + w, y(a.toFloat())))
+        for (a in listOf(1, 5, 10)) {
+            if (a > 1) drawLine(grid, Offset(l, y(a.toFloat())), Offset(l + w, y(a.toFloat())), 1.dp.toPx())
             val m = measurer.measure("$a", style)
-            drawText(m, topLeft = Offset(l - m.size.width - 4.dp.toPx(), y(a.toFloat()) - m.size.height / 2f))
+            drawText(m, topLeft = Offset(l - m.size.width - 6.dp.toPx(), y(a.toFloat()) - m.size.height / 2f))
         }
-        for (hr in 0..24 step 4) {
-            drawLine(axis.copy(alpha = 0.3f), Offset(x(hr.toFloat()), t), Offset(x(hr.toFloat()), t + h))
+        var hr = lo
+        while (hr < hi) {
             val m = measurer.measure("$hr", style)
-            drawText(m, topLeft = Offset(x(hr.toFloat()) - m.size.width / 2f, t + h + 4.dp.toPx()))
+            drawText(m, topLeft = Offset(x(hr + 0.5f) - m.size.width / 2f, t + h + 6.dp.toPx()))
+            hr += 3
         }
-        drawRect(axis, Offset(l, t), Size(w, h), style = Stroke(1.dp.toPx()))
-        data.forEach { e -> drawCircle(dot, 4.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.coerceIn(1, 10).toFloat()))) }
-        val avgs = (0..23).mapNotNull { hr ->
-            val xs = data.filter { it.dateTime.hour == hr }.map { it.anxiety!! }
-            if (xs.isEmpty()) null else Offset(x(hr + 0.5f), y(xs.average().toFloat()))
+        val slot = w / span
+        val barW = maxOf(3.dp.toPx(), slot * 0.45f)
+        for (hh in lo until hi) {
+            val xs = data.filter { it.dateTime.hour == hh }.map { it.anxiety!! }
+            if (xs.isEmpty()) continue
+            val top = y(xs.average().toFloat())
+            drawRect(bar, Offset(x(hh + 0.5f) - barW / 2f, top), Size(barW, y(0f) - top))
         }
-        if (avgs.size > 1) {
-            val p = Path().apply { moveTo(avgs[0].x, avgs[0].y); avgs.drop(1).forEach { lineTo(it.x, it.y) } }
-            drawPath(p, line, style = Stroke(2.5.dp.toPx()))
+        data.forEach { e ->
+            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
-        avgs.forEach { drawCircle(line, 3.dp.toPx(), it) }
+        drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
 }
 
 // ---------------- History ----------------
+
+private class DayGroup(val day: LocalDate, val rows: List<Entry>)
+
+/** Only the notable details: causes, then context that is not the unremarkable default. */
+private fun detailLine(e: Entry, prev: Entry?): String {
+    val parts = ArrayList<String>(e.causes)
+    if (e.caffeine == true) parts.add("Caffeine")
+    if (e.food == false) parts.add("No food")
+    if (e.partner == 2) parts.add("Partner tense")
+    if (prev != null && e.medDose != null && (e.medDose != prev.medDose || e.medTime != prev.medTime)) {
+        parts.add("Med " + e.medDose + (e.medTime?.let { " " + fmtMin(it) } ?: ""))
+    }
+    return parts.joinToString(" · ")
+}
 
 @Composable
 fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val entries by vm.entries.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
-    val fmt = remember { java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm") }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+    val timeFmt = remember { java.time.format.DateTimeFormatter.ofPattern("HH:mm") }
+    val dayFmt = remember { java.time.format.DateTimeFormatter.ofPattern("EEE d MMM") }
+    val groups = remember(entries) {
+        entries.groupBy { it.dateTime.toLocalDate() }
+            .map { (d, l) -> DayGroup(d, l.sortedByDescending { it.ts }) }
+            .sortedByDescending { it.day }
+    }
+    val prevOf = remember(entries) {
+        val m = HashMap<Long, Entry?>()
+        entries.forEachIndexed { i, e -> m[e.ts] = entries.getOrNull(i - 1) }
+        m
+    }
+    val today = LocalDate.now()
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
         item { ScreenTitle("History"); Spacer(Modifier.height(8.dp)) }
         if (entries.isEmpty()) {
             item { Caption("Nothing here yet. Entries show up once you log.") }
         }
-        items(entries.reversed(), key = { it.ts }) { e ->
-            val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
-                if (v != SwipeToDismissBoxValue.Settled) {
-                    vm.delete(e)
-                    scope.launch {
-                        snack.currentSnackbarData?.dismiss()
-                        if (snack.showSnackbar("Deleted", "Undo", duration = SnackbarDuration.Short) ==
-                            SnackbarResult.ActionPerformed) vm.restore(e)
-                    }
-                    true
-                } else false
-            })
-            SwipeToDismissBox(state, backgroundContent = {
-                Box(Modifier.fillMaxSize().background(cs.error).padding(16.dp), Alignment.CenterEnd) {
-                    Text("Delete", color = cs.onError)
+        groups.forEach { g ->
+            stickyHeader(key = "day-" + g.day.toEpochDay()) {
+                val label = when (g.day) {
+                    today -> "Today"
+                    today.minusDays(1) -> "Yesterday"
+                    else -> g.day.format(dayFmt)
                 }
-            }) {
+                val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
+                val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
+                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" })
+                    .joinToString(" · ")
                 Column(Modifier.fillMaxWidth().background(cs.background)) {
-                    Column(Modifier.padding(vertical = 10.dp)) {
-                        Text(e.dateTime.format(fmt), style = MaterialTheme.typography.titleSmall)
-                        Text(e.summary(), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.Bottom) {
+                        SectionHeader(label, Modifier.weight(1f))
+                        if (info.isNotEmpty()) Text(info, style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant)
                     }
                     HorizontalDivider(color = cs.outlineVariant)
+                }
+            }
+            items(g.rows, key = { it.ts }) { e ->
+                val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
+                    if (v != SwipeToDismissBoxValue.Settled) {
+                        vm.delete(e)
+                        scope.launch {
+                            snack.currentSnackbarData?.dismiss()
+                            if (snack.showSnackbar("Deleted", "Undo", duration = SnackbarDuration.Short) ==
+                                SnackbarResult.ActionPerformed) vm.restore(e)
+                        }
+                        true
+                    } else false
+                })
+                SwipeToDismissBox(state, backgroundContent = {
+                    Box(Modifier.fillMaxSize().background(cs.error).padding(16.dp), Alignment.CenterEnd) {
+                        Text("Delete", color = cs.onError)
+                    }
+                }) {
+                    Column(Modifier.fillMaxWidth().background(cs.background)) {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                            Text(e.anxiety?.toString() ?: "–", Modifier.width(40.dp),
+                                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Column(Modifier.weight(1f)) {
+                                Text(e.dateTime.format(timeFmt), style = MaterialTheme.typography.bodyLarge)
+                                val detail = detailLine(e, prevOf[e.ts])
+                                if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
+                                    color = cs.onSurfaceVariant)
+                            }
+                        }
+                        HorizontalDivider(color = cs.outlineVariant)
+                    }
                 }
             }
         }

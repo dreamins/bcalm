@@ -154,6 +154,7 @@ object Store {
         _entries.value = (_entries.value + e).sortedBy { it.ts }
         writeFile()
         CsvSync.enqueueIfEnabled(appCtx)
+        BcalmWidget.refresh(appCtx)
     }
 
     /** Replaces the entry with the same timestamp (no-op if it no longer exists). */
@@ -163,6 +164,7 @@ object Store {
         _entries.value = _entries.value.map { if (it.ts == e.ts) e else it }
         writeFile()
         CsvSync.enqueueIfEnabled(appCtx)
+        BcalmWidget.refresh(appCtx)
     }
 
     @Synchronized
@@ -170,12 +172,24 @@ object Store {
         _entries.value = _entries.value.filter { it.ts != e.ts }
         writeFile()
         CsvSync.enqueueIfEnabled(appCtx)
+        BcalmWidget.refresh(appCtx)
     }
 
     /** Saves the carried-over draft as a new entry and clears any reminder. */
     fun logDraft(ctx: Context): Entry {
         val e = entryFrom(loadDraft())
         add(e)
+        Reminders.cancelNotification(ctx)
+        return e
+    }
+
+    /** Widget tap: log [n] with all other values carried over (no causes); same path as "Same as last". */
+    fun quickLog(ctx: Context, n: Int): Entry {
+        val d = loadDraft().copy(anxiety = n)
+        saveDraft(d)
+        val ts = maxOf(System.currentTimeMillis(), (_entries.value.lastOrNull()?.ts ?: 0L) + 1)
+        val e = entryFrom(d, emptyList(), ts)
+        add(e)   // persists, enqueues CsvSync and refreshes the widget
         Reminders.cancelNotification(ctx)
         return e
     }

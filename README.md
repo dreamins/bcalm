@@ -10,13 +10,14 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 
 ## Features
 
-- **One-tap save.** Every field carries over from your last entry, so logging is usually a single tap.
-- **Daily fields reset at midnight:** wake time, sleep quality and exercise.
+- **Tap to log.** Tap a number and the entry is saved at once with everything carried over from last time. An Undo bar appears, and for two minutes further changes on the Log screen update that entry instead of creating a new one.
+- **Today summary.** Wake time, sleep quality and exercise sit in one collapsible card and reset at midnight.
 - **Medication is set once in Settings** (optional name, current dose, usual time) and recorded automatically with every entry.
-- **Cause chips** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
+- **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
-- **Chart** of anxiety versus time of day, plus per-cause statistics.
-- **History** with swipe-to-delete.
+- **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
+- **Insights chart.** Hourly average bars with single entries as dots, a plain-language note on your hardest time of day, and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
+- **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
 - **CSV export**, and **auto-sync to Google Drive** via a file you pick once.
 
 ## Screenshots
