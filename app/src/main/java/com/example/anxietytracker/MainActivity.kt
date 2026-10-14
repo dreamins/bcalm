@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val vm: MainViewModel = viewModel()
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
-                AppScreen(vm, onExport = { exportCsv() })
+                AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0))
             }
         }
     }

@@ -40,8 +40,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
-fun AppScreen(vm: MainViewModel, onExport: () -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
+fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0) {
+    var tab by remember { mutableIntStateOf(initialTab.coerceIn(0, 3)) }
     val snack = remember { SnackbarHostState() }
     Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
