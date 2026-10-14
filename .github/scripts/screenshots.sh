@@ -8,6 +8,13 @@ OUT=docs/screenshots
 WORK=$(mktemp -d)
 mkdir -p "$OUT"
 
+# Let the freshly booted emulator settle, and suppress system "isn't responding" dialogs
+adb shell settings put global hide_error_dialogs 1 || true
+for _ in $(seq 1 30); do
+  [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] && break; sleep 2
+done
+sleep 20
+adb shell input keyevent KEYCODE_HOME || true
 adb install -r "$APK"
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
 adb shell am force-stop "$PKG"
@@ -37,6 +44,17 @@ for i in 0 1 2 3; do
   adb shell am force-stop "$PKG"
   adb shell am start -W -n "$PKG/.MainActivity" --ei tab "$i"
   sleep 4
+  # Dismiss any ANR/system dialog that popped up (keep the app in front)
+  for _ in 1 2 3; do
+    if adb shell dumpsys window | grep -qiE "Application Not Responding|isn't responding"; then
+      adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS || true
+      adb shell input keyevent KEYCODE_BACK || true
+      sleep 2
+      adb shell am force-stop "$PKG"
+      adb shell am start -W -n "$PKG/.MainActivity" --ei tab "$i"
+      sleep 3
+    fi
+  done
   adb exec-out screencap -p > "$OUT/${NAMES[$i]}.png"
 done
 
