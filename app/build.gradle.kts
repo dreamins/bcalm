@@ -13,8 +13,10 @@ android {
         applicationId = "com.example.anxietytracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        val run = System.getenv("GITHUB_RUN_NUMBER")
+        val sha = System.getenv("GITHUB_SHA")?.take(7)
+        versionCode = run?.toIntOrNull() ?: 1
+        versionName = if (run == null) "1.0-dev" else "1.0.$run" + (sha?.let { "-$it" } ?: "")
     }
 
     buildTypes {

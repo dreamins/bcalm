@@ -690,6 +690,10 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         SettingsSection("Data") {
             TextButton(onClick = onExport) { Text("Export CSV") }
         }
+
+        val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
+        val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
+        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp))
     }
 
     if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {
