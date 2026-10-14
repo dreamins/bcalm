@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Anxiety Tracker launcher foreground: calm ring, settling wave, logged point.
+     Artwork stays inside the 66dp adaptive-icon safe zone (21..87). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Breath / calm ring -->
+    <path
+        android:name="ring"
+        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z"
+        android:strokeColor="#E8F4F1"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Sine-like wave: high on the left, settling lower and flatter to the right -->
+    <path
+        android:name="wave"
+        android:pathData="M32.00,43.50 C32.56,44.15 34.22,45.52 35.33,47.41 C36.44,49.30 37.56,52.53 38.67,54.83 C39.78,57.14 40.89,59.82 42.00,61.22 C43.11,62.62 44.22,63.35 45.33,63.23 C46.44,63.12 47.56,61.81 48.67,60.52 C49.78,59.23 50.89,57.00 52.00,55.50 C53.11,54.00 54.22,52.32 55.33,51.52 C56.44,50.72 57.56,50.47 58.67,50.70 C59.78,50.93 60.89,51.98 62.00,52.89 C63.11,53.80 64.22,55.25 65.33,56.17 C66.44,57.09 67.56,57.99 68.67,58.41 C69.78,58.83 71.44,58.65 72.00,58.70"
+        android:strokeColor="#E8F4F1"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Warm logged point at the end of the wave -->
+    <path
+        android:name="point"
+        android:pathData="M76,58.7 A4,4 0 1,0 68,58.7 A4,4 0 1,0 76,58.7 Z"
+        android:fillColor="#F2B880" />
+</vector>
