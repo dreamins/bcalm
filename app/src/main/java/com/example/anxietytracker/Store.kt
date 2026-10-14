@@ -107,16 +107,18 @@ object Store {
     val medDose: StateFlow<Double?> = _medDose
     fun setMedDose(v: Double?) {
         _medDose.value = v
-        prefs.edit().apply { if (v == null) remove("medDoseNum") else putString("medDoseNum", v.toString()) }.apply()
+        prefs.edit().apply { if (v == null) remove("medDoseNum") else putString("medDoseNum", fmtNum(v)) }.apply()
     }
 
     /** Earlier versions kept free-text doses ("10 mg") in Settings; turn the current one into number + unit. */
     private fun loadMedDose() {
         if (prefs.contains("medCurrentDose") || prefs.contains("doses")) {
-            val (n, unit) = parseDose(prefs.getString("medCurrentDose", null))
+            val (n, curUnit) = parseDose(prefs.getString("medCurrentDose", null))
+            val unit = curUnit ?: prefs.getString("doses", "")!!.split("\n")
+                .map { parseDose(it) }.firstOrNull { it.first != null && it.second != null }?.second
             val e = prefs.edit().remove("medCurrentDose").remove("doses")
-            if (n != null && !prefs.contains("medDoseNum")) e.putString("medDoseNum", n.toString())
-            if (n != null && unit != null && !prefs.contains("medUnit")) e.putString("medUnit", clean(unit))
+            if (n != null && !prefs.contains("medDoseNum")) e.putString("medDoseNum", fmtNum(n))
+            if (unit != null && !prefs.contains("medUnit")) e.putString("medUnit", clean(unit))
             e.apply()
         }
         _medDose.value = prefs.getString("medDoseNum", null)?.toDoubleOrNull()

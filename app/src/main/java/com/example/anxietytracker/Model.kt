@@ -58,8 +58,7 @@ val PARTNER_DISPLAY = listOf("Good", "Neutral", "Tense")
 fun fmtMin(m: Int) = "%02d:%02d".format(m / 60, m % 60)
 
 /** 5.0 -> "5", 7.5 -> "7.5". */
-fun fmtNum(d: Double): String =
-    if (d == Math.floor(d) && Math.abs(d) < 1e9) d.toLong().toString() else d.toString()
+fun fmtNum(d: Double): String = java.math.BigDecimal.valueOf(d).stripTrailingZeros().toPlainString()
 
 fun fmtDose(d: Double, unit: String?) = fmtNum(d) + (unit?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
 
