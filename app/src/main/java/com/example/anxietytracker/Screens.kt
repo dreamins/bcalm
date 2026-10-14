@@ -47,6 +47,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -283,19 +285,27 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             Segmented(PARTNER_DISPLAY, d.partner, Modifier.width(240.dp)) { vm.setPartner(it) }
         }
 
-        TodayCard(d, todayExpanded, onToggle = { vm.setTodayOpen(!todayExpanded) }, vm = vm)
+        TodayCard(d, entries, todayExpanded, onToggle = { vm.setTodayOpen(!todayExpanded) }, vm = vm)
         Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-private fun TodayCard(d: Draft, expanded: Boolean, onToggle: () -> Unit, vm: MainViewModel) {
+private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggle: () -> Unit, vm: MainViewModel) {
     val cs = MaterialTheme.colorScheme
     var showTime by remember { mutableStateOf(false) }
-    val summary = listOf(
+    var otherDose by remember { mutableStateOf(false) }
+    val dose by vm.medDose.collectAsStateWithLifecycle()
+    val unit = Store.medUnit
+    // Quick picks: the current dose plus the most recently used ones, smallest first.
+    val doseOptions = remember(entries, dose) {
+        (listOfNotNull(dose) + entries.asReversed().mapNotNull { it.medDose }).distinct().take(4).sorted()
+    }
+    val summary = listOfNotNull(
         d.wakeMin?.let { "Woke ${fmtMin(it)}" } ?: "Woke —",
         d.sleep?.let { "Slept $it/5" } ?: "Slept —",
         d.exercise?.let { if (it) "Exercised" else "No exercise" } ?: "Exercise —",
+        dose?.let { "Med " + fmtDose(it, unit) },
     ).joinToString(" · ")
     Column(Modifier.fillMaxWidth().border(1.dp, cs.outlineVariant, SmallShape)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(onClick = onToggle)
@@ -325,10 +335,33 @@ private fun TodayCard(d: Draft, expanded: Boolean, onToggle: () -> Unit, vm: Mai
                 LabeledRow("Exercised today") {
                     Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(140.dp)) { vm.setExercise(idxToBool(it)) }
                 }
+                LabeledRow(if (unit.isBlank()) "Med dose" else "Med dose ($unit)") {
+                    if (doseOptions.isNotEmpty()) {
+                        Segmented(doseOptions.map { fmtNum(it) }, doseOptions.indexOf(dose).takeIf { it >= 0 },
+                            Modifier.width((52 * doseOptions.size).dp)) { i -> vm.setMedDose(i?.let { doseOptions[it] }) }
+                    }
+                    TextButton(onClick = { otherDose = true }) { Text(if (doseOptions.isEmpty()) "Set" else "Other") }
+                }
             }
         }
     }
     if (showTime) TimeDialog(d.wakeMin, { showTime = false }) { vm.setWake(it); showTime = false }
+    if (otherDose) DoseDialog(dose, unit, { otherDose = false }) { vm.setMedDose(it); otherDose = false }
+}
+
+@Composable
+private fun DoseDialog(initial: Double?, unit: String, onDismiss: () -> Unit, onOk: (Double) -> Unit) {
+    var text by remember { mutableStateOf(initial?.let { fmtNum(it) } ?: "") }
+    val value = text.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text("Dose") },
+        text = {
+            OutlinedTextField(value = text, onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(8) },
+                singleLine = true, shape = SmallShape, suffix = { if (unit.isNotBlank()) Text(unit) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        },
+        confirmButton = { TextButton(onClick = { value?.let(onOk) }, enabled = value != null) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -516,7 +549,7 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
                 val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
                 // Medication is a background setting, so it describes the day rather than any one entry.
-                val med = g.rows.reversed().mapNotNull { it.medDose }.distinct()
+                val med = g.rows.asReversed().mapNotNull { it.medLabel }.distinct()
                     .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
                 val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med)
                     .joinToString(" · ")
@@ -583,13 +616,10 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var hours by remember { mutableIntStateOf(Store.intervalHours) }
-    val doses by vm.doses.collectAsStateWithLifecycle()
     var medName by remember { mutableStateOf(Store.medName) }
-    var curDose by remember { mutableStateOf(Store.medCurrentDose) }
+    var medUnit by remember { mutableStateOf(Store.medUnit) }
     var usualTime by remember { mutableStateOf(Store.medUsualTime) }
     var showTime by remember { mutableStateOf(false) }
-    var addDose by remember { mutableStateOf(false) }
-    var rmDose by remember { mutableStateOf<String?>(null) }
     val syncUri by Store.syncUri.collectAsStateWithLifecycle()
     val syncState by Store.syncState.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -614,17 +644,13 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         }
 
         SettingsSection("Medication",
-            "Set once. It is recorded with every entry. Long-press a dose to remove it.") {
+            "Pick the dose under Today on the Log screen. It carries over day to day and is recorded with every entry.") {
             OutlinedTextField(value = medName, onValueChange = { medName = it.take(30); Store.medName = medName },
                 label = { Text("Name (optional)") }, singleLine = true, shape = SmallShape,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            OutlinedTextField(value = medUnit, onValueChange = { medUnit = it.take(12); Store.medUnit = medUnit },
+                label = { Text("Unit") }, placeholder = { Text("mg") }, singleLine = true, shape = SmallShape,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-            doses.forEach { dz ->
-                CheckRow(dz, curDose == dz, onLongClick = { rmDose = dz }) {
-                    curDose = if (curDose == dz) null else dz; Store.medCurrentDose = curDose
-                }
-            }
-            TextButton(onClick = { addDose = true }) { Text("Add dose…") }
-            HorizontalDivider(color = cs.outlineVariant)
             LabeledRow("Usual time") {
                 TextButton(onClick = { showTime = true }) { Text(usualTime?.let { fmtMin(it) } ?: "Set") }
                 if (usualTime != null) TextButton(onClick = { usualTime = null; Store.medUsualTime = null }) {
@@ -667,20 +693,5 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
     if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {
         usualTime = it; Store.medUsualTime = it; showTime = false
-    }
-    if (addDose) {
-        var text by remember { mutableStateOf("") }
-        AlertDialog(onDismissRequest = { addDose = false },
-            title = { Text("New dose") },
-            text = { OutlinedTextField(value = text, onValueChange = { text = it.take(30) }, singleLine = true,
-                shape = SmallShape, placeholder = { Text("e.g. 10 mg") }) },
-            confirmButton = { TextButton(onClick = { Store.addDose(text); addDose = false }) { Text("Add") } },
-            dismissButton = { TextButton(onClick = { addDose = false }) { Text("Cancel") } })
-    }
-    rmDose?.let { dz ->
-        AlertDialog(onDismissRequest = { rmDose = null },
-            title = { Text("Remove \"$dz\"?") },
-            confirmButton = { TextButton(onClick = { Store.removeDose(dz); if (curDose == dz) curDose = null; rmDose = null }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { rmDose = null }) { Text("Keep") } })
     }
 }

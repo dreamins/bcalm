@@ -26,7 +26,7 @@ object Store {
         file = File(app.filesDir, "entries.txt")
         _entries.value = readFile()
         loadCauses()
-        loadDoses()
+        loadMedDose()
         _syncUri.value = prefs.getString("syncUri", null)
         _syncState.value = SyncState(prefs.getLong("syncTime", 0L), prefs.getString("syncMsg", "") ?: "")
     }
@@ -90,37 +90,38 @@ object Store {
         prefs.edit().putLong("syncTime", st.time).putString("syncMsg", st.message).apply()
     }
 
-    // ---- medication settings (set once in Settings) ----
+    // ---- medication: name/unit/usual time set in Settings; dose picked on the Log screen ----
     var medName: String
         get() = prefs.getString("medName", "") ?: ""
         set(v) { prefs.edit().putString("medName", clean(v)).apply() }
-
-    /** Current dose (null = none); changes rarely, recorded with every entry. */
-    var medCurrentDose: String?
-        get() = prefs.getString("medCurrentDose", null)?.ifBlank { null }
-        set(v) { prefs.edit().apply { if (v.isNullOrBlank()) remove("medCurrentDose") else putString("medCurrentDose", v) }.apply() }
+    var medUnit: String
+        get() = prefs.getString("medUnit", "mg") ?: "mg"
+        set(v) { prefs.edit().putString("medUnit", clean(v)).apply() }
     /** Usual time taken, minutes since midnight (null = none). */
     var medUsualTime: Int?
         get() = if (prefs.contains("medUsualTime")) prefs.getInt("medUsualTime", 0) else null
         set(v) { prefs.edit().apply { if (v == null) remove("medUsualTime") else putInt("medUsualTime", v) }.apply() }
 
-    private val _doses = MutableStateFlow<List<String>>(emptyList())
-    val doses: StateFlow<List<String>> = _doses
-    private fun loadDoses() {
-        _doses.value = prefs.getString("doses", "")!!.split("\n").filter { it.isNotBlank() }
+    /** Current dose (null = none). Carries over day to day until changed; recorded with every entry. */
+    private val _medDose = MutableStateFlow<Double?>(null)
+    val medDose: StateFlow<Double?> = _medDose
+    fun setMedDose(v: Double?) {
+        _medDose.value = v
+        prefs.edit().apply { if (v == null) remove("medDoseNum") else putString("medDoseNum", v.toString()) }.apply()
     }
-    private fun saveDoses(l: List<String>) {
-        _doses.value = l
-        prefs.edit().putString("doses", l.joinToString("\n")).apply()
+
+    /** Earlier versions kept free-text doses ("10 mg") in Settings; turn the current one into number + unit. */
+    private fun loadMedDose() {
+        if (prefs.contains("medCurrentDose") || prefs.contains("doses")) {
+            val (n, unit) = parseDose(prefs.getString("medCurrentDose", null))
+            val e = prefs.edit().remove("medCurrentDose").remove("doses")
+            if (n != null && !prefs.contains("medDoseNum")) e.putString("medDoseNum", n.toString())
+            if (n != null && unit != null && !prefs.contains("medUnit")) e.putString("medUnit", clean(unit))
+            e.apply()
+        }
+        _medDose.value = prefs.getString("medDoseNum", null)?.toDoubleOrNull()
     }
-    fun addDose(name: String) {
-        val n = clean(name)
-        if (n.isNotEmpty() && _doses.value.none { it.equals(n, true) }) saveDoses(_doses.value + n)
-    }
-    fun removeDose(name: String) {
-        saveDoses(_doses.value - name)
-        if (medCurrentDose == name) medCurrentDose = null
-    }
+
     private fun clean(s: String) = s.trim().replace(Regex("[;|,\n]"), " ").take(30)
 
     // ---- causes list (presets + custom; user can remove any) ----
@@ -146,7 +147,8 @@ object Store {
     // ---- entries ----
     fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis()): Entry {
         val n = d.normalized()
-        return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes, medCurrentDose, medUsualTime)
+        return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes,
+            _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } })
     }
 
     @Synchronized
@@ -203,7 +205,7 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose ?: "", n(e.medTime)).joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "").joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -215,10 +217,13 @@ object Store {
             if (p.size < 8) return@mapNotNull null
             val ts = p[0].toLongOrNull() ?: return@mapNotNull null
             fun i(s: String) = s.toIntOrNull()
+            // Older lines have a free-text dose ("10 mg") in field 9 and no field 11.
+            val (dose, legacyUnit) = parseDose(p.getOrNull(9))
             Entry(ts, i(p[1]), i(p[2])?.let { it == 1 }, i(p[3])?.let { it == 1 },
                 i(p[4])?.let { it == 1 }, i(p[5]), i(p[6]), i(p[7]),
                 p.getOrNull(8)?.split(";")?.filter { it.isNotBlank() } ?: emptyList(),
-                p.getOrNull(9)?.takeIf { it.isNotBlank() }, p.getOrNull(10)?.let { i(it) })
+                dose, p.getOrNull(10)?.let { i(it) },
+                p.getOrNull(11)?.takeIf { it.isNotBlank() } ?: legacyUnit)
         }.sortedBy { it.ts }
     }
 }

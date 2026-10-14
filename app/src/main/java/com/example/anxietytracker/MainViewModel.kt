@@ -26,7 +26,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val selectedCauses: StateFlow<Set<String>> = _causes
     val entries = Store.entries
     val causeList = Store.causeList
-    val doses = Store.doses
+    val medDose = Store.medDose
 
     /** The entry just logged and still open for edits (null = next number tap creates a new entry). */
     private val _active = MutableStateFlow<Entry?>(null)
@@ -60,6 +60,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setPartner(v: Int?) = update { it.copy(partner = v) }
     fun setWake(v: Int?) = update { it.copy(wakeMin = v, wakeDay = Store.today()) }
     fun setSleep(v: Int?) = update { it.copy(sleep = v, sleepDay = Store.today()) }
+    fun setMedDose(v: Double?) {
+        Store.setMedDose(v)
+        syncActive()
+    }
 
     fun toggleCause(c: String) {
         _causes.value = _causes.value.let { if (c in it) it - c else it + c }

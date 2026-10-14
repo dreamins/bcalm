@@ -37,9 +37,12 @@ data class Entry(
     val wakeMin: Int?,
     val sleep: Int?,
     val causes: List<String> = emptyList(),
-    val medDose: String? = null,
+    val medDose: Double? = null,
     val medTime: Int? = null,
+    val medUnit: String? = null,
 ) {
+    /** e.g. "5 mg"; null when no dose was recorded. */
+    val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
     val dateTime: LocalDateTime
         get() = LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.systemDefault())
 
@@ -54,6 +57,25 @@ val PARTNER_DISPLAY = listOf("Good", "Neutral", "Tense")
 
 fun fmtMin(m: Int) = "%02d:%02d".format(m / 60, m % 60)
 
+/** 5.0 -> "5", 7.5 -> "7.5". */
+fun fmtNum(d: Double): String =
+    if (d == Math.floor(d) && Math.abs(d) < 1e9) d.toLong().toString() else d.toString()
+
+fun fmtDose(d: Double, unit: String?) = fmtNum(d) + (unit?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
+
+private val DOSE_RE = Regex("""^\s*(\d+(?:[.,]\d+)?)\s*(.*?)\s*$""")
+
+/**
+ * Splits a dose label into number and unit: "5mg" -> (5.0, "mg"), "7,5 mg" -> (7.5, "mg"), "10" -> (10.0, null).
+ * Older versions stored free text; anything without a leading number is kept whole as the unit.
+ */
+fun parseDose(s: String?): Pair<Double?, String?> {
+    if (s.isNullOrBlank()) return null to null
+    val m = DOSE_RE.matchEntire(s) ?: return null to s.trim()
+    val n = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null to s.trim()
+    return n to m.groupValues[2].ifBlank { null }
+}
+
 fun Entry.summary(): String {
     fun yn(b: Boolean?) = when (b) { true -> "Yes"; false -> "No"; null -> "-" }
     return buildString {
@@ -61,8 +83,8 @@ fun Entry.summary(): String {
         append("  Caf ${yn(caffeine)}  Food ${yn(food)}  Ex ${yn(exercise)}")
         append("\nPartner ${partner?.let { PARTNER_DISPLAY[it] } ?: "-"}")
         append("  Wake ${wakeMin?.let { fmtMin(it) } ?: "-"}  Sleep ${sleep ?: "-"}")
-        if (medDose != null || medTime != null)
-            append("\nMed ${medDose ?: "-"} ${medTime?.let { fmtMin(it) } ?: ""}")
+        if (medLabel != null || medTime != null)
+            append("\nMed ${medLabel ?: "-"} ${medTime?.let { fmtMin(it) } ?: ""}")
         if (causes.isNotEmpty()) append("\n" + causes.joinToString(", "))
     }
 }
@@ -72,7 +94,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -86,9 +108,10 @@ object Csv {
                 e.partner?.let { PARTNER_LABELS[it] } ?: "",
                 e.wakeMin?.let { fmtMin(it) } ?: "",
                 e.sleep?.toString() ?: "",
-                e.medDose?.replace(",", " ") ?: "",
+                e.medDose?.let { fmtNum(it) } ?: "",
                 e.medTime?.let { fmtMin(it) } ?: "",
                 e.causes.joinToString(";").replace(",", " "),
+                e.medUnit?.replace(",", " ") ?: "",
             ).joinToString(","))
             append('\n')
         }

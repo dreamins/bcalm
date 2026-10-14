@@ -3,7 +3,7 @@
 
 usage: seed_demo.py OUTDIR TZ_OFFSET_MINUTES
 Formats mirror Store.kt: entries are '|' joined lines
-ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime
+ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit
 and prefs live in shared_prefs/draft.xml.
 """
 import os
@@ -33,6 +33,7 @@ for back in range(14, -1, -1):
     sleep = random.choice([2, 3, 3, 4])
     exercise = random.random() < 0.5
     took_med = random.random() < 0.85
+    day_dose = "10" if back > 5 else "15"
     med_time = wake + 45
     n = random.randint(3, 5)
     hours = sorted(random.sample(range(8, 22), n))
@@ -51,11 +52,11 @@ for back in range(14, -1, -1):
             cs = ["No clear reason"] if random.random() < 0.5 else []
         f = lambda v: "" if v is None else str(v)
         b = lambda v: "1" if v else "0"
-        dose = "10 mg" if (took_med and h * 60 + minute >= med_time) else ""
+        dose = day_dose if (took_med and h * 60 + minute >= med_time) else ""
         lines.append("|".join([
             str(ts), str(a), b(random.random() < 0.6), b(random.random() < 0.7),
             b(exercise and h >= 12), str(random.choice([0, 0, 1, 2])), str(wake), str(sleep),
-            ";".join(cs), dose, str(med_time) if dose else "",
+            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "",
         ]))
 
 os.makedirs(out, exist_ok=True)
@@ -67,10 +68,9 @@ prefs = [
     ("long", "exerciseDay", today), ("int", "partner", 1),
     ("int", "wakeMin", 420), ("long", "wakeDay", today),
     ("int", "sleep", 3), ("long", "sleepDay", today),
-    ("string", "medCurrentDose", "10 mg"), ("int", "medUsualTime", 480),
+    ("string", "medDoseNum", "15.0"), ("string", "medUnit", "mg"), ("int", "medUsualTime", 480),
     ("int", "intervalHours", 3),
     ("string", "medName", ""),
-    ("string", "doses", "5 mg\n10 mg\n20 mg"),
 ]
 with open(os.path.join(out, "draft.xml"), "w") as fh:
     fh.write("<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n")
