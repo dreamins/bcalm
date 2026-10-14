@@ -162,6 +162,19 @@ object Store {
         BcalmWidget.refresh(appCtx)
     }
 
+    /** Adds entries whose timestamp is not present yet; returns how many were added. */
+    @Synchronized
+    fun importEntries(list: List<Entry>): Int {
+        val have = _entries.value.mapTo(HashSet()) { it.ts }
+        val fresh = list.filter { have.add(it.ts) }
+        if (fresh.isEmpty()) return 0
+        _entries.value = (_entries.value + fresh).sortedBy { it.ts }
+        writeFile()
+        CsvSync.enqueueIfEnabled(appCtx)
+        BcalmWidget.refresh(appCtx)
+        return fresh.size
+    }
+
     /** Replaces the entry with the same timestamp (no-op if it no longer exists). */
     @Synchronized
     fun update(e: Entry) {

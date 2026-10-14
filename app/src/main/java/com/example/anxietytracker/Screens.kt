@@ -626,6 +626,20 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) CsvSync.setTarget(ctx, uri)
     }
+    val scope = rememberCoroutineScope()
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                try {
+                    val text = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                    val list = Csv.parse(text)
+                    if (list == null) "Not a valid CSV (no timestamp column)"
+                    else Store.importEntries(list).let { "Imported $it entries (${list.size - it} skipped)" }
+                } catch (e: Exception) { "Import failed: ${e.message ?: e.javaClass.simpleName}" }
+            }
+            android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
     val intervals = listOf(0, 2, 3, 4)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -688,7 +702,12 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         }
 
         SettingsSection("Data") {
-            TextButton(onClick = onExport) { Text("Export CSV") }
+            Row {
+                TextButton(onClick = onExport) { Text("Export CSV") }
+                TextButton(onClick = {
+                    importer.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream", "*/*"))
+                }) { Text("Import CSV…") }
+            }
         }
 
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }

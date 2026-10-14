@@ -117,4 +117,30 @@ object Csv {
             append('\n')
         }
     }
+
+    /** Parses [build] output (any historical column set, matched by header name); null if no timestamp column. */
+    fun parse(text: String): List<Entry>? {
+        val lines = text.removePrefix("\uFEFF").lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val head = lines.firstOrNull()?.split(",")?.map { it.trim().lowercase() } ?: return null
+        if ("timestamp" !in head) return null
+        val out = ArrayList<Entry>()
+        for (line in lines.drop(1)) {
+            val f = line.split(",").map { it.trim() }
+            fun col(n: String) = head.indexOf(n).let { if (it >= 0) f.getOrNull(it) else null }?.ifEmpty { null }
+            fun bool(n: String) = when (col(n)) { "1" -> true; "0" -> false; else -> null }
+            fun min(n: String) = col(n)?.split(":")?.let { (it.getOrNull(0)?.toIntOrNull() ?: return@let null) * 60 + (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+            val ts = try {
+                LocalDateTime.parse(col("timestamp") ?: continue, dt).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            } catch (e: Exception) { continue }
+            val (dose, legacyUnit) = parseDose(col("med_dose"))
+            out += Entry(
+                ts, col("anxiety")?.toIntOrNull(), bool("caffeine"), bool("food_3h"), bool("exercise_today"),
+                col("partner")?.lowercase()?.let { PARTNER_LABELS.indexOf(it) }?.takeIf { it >= 0 },
+                min("wake_time"), col("sleep_quality")?.toIntOrNull(),
+                col("causes")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
+                dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
+            )
+        }
+        return out
+    }
 }

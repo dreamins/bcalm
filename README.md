@@ -18,7 +18,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
 - **Insights chart.** Hourly average bars with single entries as dots, a plain-language note on your hardest time of day, and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
-- **CSV export**, and **auto-sync to Google Drive** via a file you pick once.
+- **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once.
 
 ## Screenshots
 
