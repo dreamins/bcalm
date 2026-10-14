@@ -40,6 +40,7 @@ data class Entry(
     val medDose: Double? = null,
     val medTime: Int? = null,
     val medUnit: String? = null,
+    val medName: String? = null,
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
@@ -83,7 +84,7 @@ fun Entry.summary(): String {
         append("\nPartner ${partner?.let { PARTNER_DISPLAY[it] } ?: "-"}")
         append("  Wake ${wakeMin?.let { fmtMin(it) } ?: "-"}  Sleep ${sleep ?: "-"}")
         if (medLabel != null || medTime != null)
-            append("\nMed ${medLabel ?: "-"} ${medTime?.let { fmtMin(it) } ?: ""}")
+            append("\nMed ${listOfNotNull(medName, medLabel ?: "-").joinToString(" ")} ${medTime?.let { fmtMin(it) } ?: ""}")
         if (causes.isNotEmpty()) append("\n" + causes.joinToString(", "))
     }
 }
@@ -93,7 +94,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -111,6 +112,7 @@ object Csv {
                 e.medTime?.let { fmtMin(it) } ?: "",
                 e.causes.joinToString(";").replace(",", " "),
                 e.medUnit?.replace(",", " ") ?: "",
+                e.medName?.replace(",", " ") ?: "",
             ).joinToString(","))
             append('\n')
         }

@@ -3,7 +3,7 @@
 
 usage: seed_demo.py OUTDIR TZ_OFFSET_MINUTES
 Formats mirror Store.kt: entries are '|' joined lines
-ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit
+ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName
 and prefs live in shared_prefs/draft.xml.
 """
 import os
@@ -56,7 +56,7 @@ for back in range(14, -1, -1):
         lines.append("|".join([
             str(ts), str(a), b(random.random() < 0.6), b(random.random() < 0.7),
             b(exercise and h >= 12), str(random.choice([0, 0, 1, 2])), str(wake), str(sleep),
-            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "",
+            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
         ]))
 
 os.makedirs(out, exist_ok=True)

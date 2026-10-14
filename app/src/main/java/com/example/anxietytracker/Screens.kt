@@ -549,7 +549,8 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
                 val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
                 // Medication is a background setting, so it describes the day rather than any one entry.
-                val med = g.rows.asReversed().mapNotNull { it.medLabel }.distinct()
+                val med = g.rows.asReversed()
+                    .mapNotNull { e -> e.medLabel?.let { listOfNotNull(e.medName, it).joinToString(" ") } }.distinct()
                     .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
                 val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med)
                     .joinToString(" · ")
@@ -644,7 +645,7 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         }
 
         SettingsSection("Medication",
-            "Pick the dose under Today on the Log screen. It carries over day to day and is recorded with every entry.") {
+            "Pick the dose under Today on the Log screen. It carries over day to day and is recorded, with the name, in every entry.") {
             OutlinedTextField(value = medName, onValueChange = { medName = it.take(30); Store.medName = medName },
                 label = { Text("Name (optional)") }, singleLine = true, shape = SmallShape,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp))

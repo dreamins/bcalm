@@ -150,7 +150,8 @@ object Store {
     fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis()): Entry {
         val n = d.normalized()
         return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes,
-            _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } })
+            _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } },
+            _medDose.value?.let { medName.ifBlank { null } })
     }
 
     @Synchronized
@@ -207,7 +208,7 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "").joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "").joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -225,7 +226,8 @@ object Store {
                 i(p[4])?.let { it == 1 }, i(p[5]), i(p[6]), i(p[7]),
                 p.getOrNull(8)?.split(";")?.filter { it.isNotBlank() } ?: emptyList(),
                 dose, p.getOrNull(10)?.let { i(it) },
-                p.getOrNull(11)?.takeIf { it.isNotBlank() } ?: legacyUnit)
+                p.getOrNull(11)?.takeIf { it.isNotBlank() } ?: legacyUnit,
+                p.getOrNull(12)?.takeIf { it.isNotBlank() })
         }.sortedBy { it.ts }
     }
 }
