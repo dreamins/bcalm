@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Anxiety Tracker monochrome layer for Android 13+ themed icons.
-     Same geometry as the foreground, single color; the system tints it. -->
+<!-- bcalm monochrome layer for Android 13+ themed icons. Same geometry, single color. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -9,24 +8,19 @@
 
     <path
         android:name="ring"
-        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z"
+        android:pathData="M28,54 A26,26 0 1,0 80,54 A26,26 0 1,0 28,54 Z"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="4"
+        android:strokeWidth="3.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
 
     <path
         android:name="wave"
-        android:pathData="M32.00,43.50 C32.56,44.15 34.22,45.52 35.33,47.41 C36.44,49.30 37.56,52.53 38.67,54.83 C39.78,57.14 40.89,59.82 42.00,61.22 C43.11,62.62 44.22,63.35 45.33,63.23 C46.44,63.12 47.56,61.81 48.67,60.52 C49.78,59.23 50.89,57.00 52.00,55.50 C53.11,54.00 54.22,52.32 55.33,51.52 C56.44,50.72 57.56,50.47 58.67,50.70 C59.78,50.93 60.89,51.98 62.00,52.89 C63.11,53.80 64.22,55.25 65.33,56.17 C66.44,57.09 67.56,57.99 68.67,58.41 C69.78,58.83 71.44,58.65 72.00,58.70"
+        android:pathData="M35.00,49.30 C35.23,49.38 35.90,49.53 36.36,49.76 C36.81,49.98 37.26,50.30 37.71,50.64 C38.17,50.99 38.62,51.41 39.07,51.82 C39.52,52.24 39.98,52.70 40.43,53.13 C40.88,53.57 41.33,54.02 41.79,54.41 C42.24,54.81 42.69,55.20 43.14,55.52 C43.60,55.84 44.05,56.13 44.50,56.34 C44.95,56.56 45.40,56.72 45.86,56.81 C46.31,56.91 46.76,56.94 47.21,56.91 C47.67,56.89 48.12,56.80 48.57,56.68 C49.02,56.56 49.48,56.37 49.93,56.17 C50.38,55.97 50.83,55.73 51.29,55.49 C51.74,55.25 52.19,54.98 52.64,54.73 C53.10,54.48 53.55,54.22 54.00,54.00 C54.45,53.78 54.90,53.56 55.36,53.38 C55.81,53.21 56.26,53.06 56.71,52.94 C57.17,52.83 57.62,52.75 58.07,52.70 C58.52,52.66 58.98,52.65 59.43,52.66 C59.88,52.68 60.33,52.73 60.79,52.79 C61.24,52.86 61.69,52.95 62.14,53.04 C62.60,53.14 63.05,53.25 63.50,53.35 C63.95,53.46 64.40,53.57 64.86,53.67 C65.31,53.76 65.76,53.85 66.21,53.93 C66.67,54.00 67.12,54.07 67.57,54.11 C68.02,54.16 68.48,54.19 68.93,54.20 C69.38,54.22 69.83,54.22 70.29,54.21 C70.74,54.20 71.19,54.18 71.64,54.16 C72.10,54.14 72.77,54.11 73.00,54.10"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.5"
+        android:strokeWidth="3.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
-
-    <path
-        android:name="point"
-        android:pathData="M76,58.7 A4,4 0 1,0 68,58.7 A4,4 0 1,0 76,58.7 Z"
-        android:fillColor="#FFFFFF" />
 </vector>
