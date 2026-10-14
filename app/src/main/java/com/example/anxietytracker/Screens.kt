@@ -480,14 +480,11 @@ fun AnxietyChart(data: List<Entry>, modifier: Modifier) {
 private class DayGroup(val day: LocalDate, val rows: List<Entry>)
 
 /** Only the notable details: causes, then context that is not the unremarkable default. */
-private fun detailLine(e: Entry, prev: Entry?): String {
+private fun detailLine(e: Entry): String {
     val parts = ArrayList<String>(e.causes)
     if (e.caffeine == true) parts.add("Caffeine")
     if (e.food == false) parts.add("No food")
     if (e.partner == 2) parts.add("Partner tense")
-    if (prev != null && e.medDose != null && (e.medDose != prev.medDose || e.medTime != prev.medTime)) {
-        parts.add("Med " + e.medDose + (e.medTime?.let { " " + fmtMin(it) } ?: ""))
-    }
     return parts.joinToString(" · ")
 }
 
@@ -502,11 +499,6 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
         entries.groupBy { it.dateTime.toLocalDate() }
             .map { (d, l) -> DayGroup(d, l.sortedByDescending { it.ts }) }
             .sortedByDescending { it.day }
-    }
-    val prevOf = remember(entries) {
-        val m = HashMap<Long, Entry?>()
-        entries.forEachIndexed { i, e -> m[e.ts] = entries.getOrNull(i - 1) }
-        m
     }
     val today = LocalDate.now()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
@@ -523,7 +515,10 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 }
                 val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
                 val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
-                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" })
+                // Medication is a background setting, so it describes the day rather than any one entry.
+                val med = g.rows.reversed().mapNotNull { it.medDose }.distinct()
+                    .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
+                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med)
                     .joinToString(" · ")
                 Column(Modifier.fillMaxWidth().background(cs.background)) {
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
@@ -558,7 +553,7 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Column(Modifier.weight(1f)) {
                                 Text(e.dateTime.format(timeFmt), style = MaterialTheme.typography.bodyLarge)
-                                val detail = detailLine(e, prevOf[e.ts])
+                                val detail = detailLine(e)
                                 if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
                                     color = cs.onSurfaceVariant)
                             }
