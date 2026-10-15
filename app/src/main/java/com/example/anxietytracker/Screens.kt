@@ -618,7 +618,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var hours by remember { mutableIntStateOf(Store.intervalHours) }
     var medName by remember { mutableStateOf(Store.medName) }
-    var medUnit by remember { mutableStateOf(Store.medUnit) }
+    var unit by remember { mutableStateOf(Store.medUnit) }
+    var unitMenu by remember { mutableStateOf(false) }
+    var doseText by remember { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }
     var usualTime by remember { mutableStateOf(Store.medUsualTime) }
     var showTime by remember { mutableStateOf(false) }
     val syncUri by Store.syncUri.collectAsStateWithLifecycle()
@@ -659,13 +661,30 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         }
 
         SettingsSection("Medication",
-            "Pick the dose under Today on the Log screen. It carries over day to day and is recorded, with the name, in every entry.") {
+            "Recorded with every entry. Change the dose here or under Today on the Log screen.") {
             OutlinedTextField(value = medName, onValueChange = { medName = it.take(30); Store.medName = medName },
                 label = { Text("Name (optional)") }, singleLine = true, shape = SmallShape,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            OutlinedTextField(value = medUnit, onValueChange = { medUnit = it.take(12); Store.medUnit = medUnit },
-                label = { Text("Unit") }, placeholder = { Text("mg") }, singleLine = true, shape = SmallShape,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(value = doseText, onValueChange = { v ->
+                    val t = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+                    if (t.count { it == '.' } <= 1) { doseText = t.take(8); Store.setMedDose(doseText.toDoubleOrNull()) }
+                }, label = { Text("Dose") }, singleLine = true, shape = SmallShape,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f))
+                Box {
+                    OutlinedButton(onClick = { unitMenu = true }, shape = SmallShape,
+                        modifier = Modifier.height(56.dp).width(120.dp)) { Text("$unit ▾", maxLines = 1) }
+                    DropdownMenu(unitMenu, { unitMenu = false }) {
+                        MED_UNITS.forEach { u ->
+                            DropdownMenuItem(text = { Text(u) }, onClick = {
+                                unit = u; Store.medUnit = u; unitMenu = false
+                            })
+                        }
+                    }
+                }
+            }
             LabeledRow("Usual time") {
                 TextButton(onClick = { showTime = true }) { Text(usualTime?.let { fmtMin(it) } ?: "Set") }
                 if (usualTime != null) TextButton(onClick = { usualTime = null; Store.medUsualTime = null }) {
@@ -712,7 +731,7 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
         val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
-        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp))
+        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp, bottom = 48.dp))
     }
 
     if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {

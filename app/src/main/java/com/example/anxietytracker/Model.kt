@@ -76,6 +76,24 @@ fun parseDose(s: String?): Pair<Double?, String?> {
     return n to m.groupValues[2].ifBlank { null }
 }
 
+val MED_UNITS = listOf("mg", "mcg", "g", "mL", "IU", "units", "drops", "tablets")
+
+/** Maps any stored/typed unit text ("5 mg", "MG", "ug", "IU") to one of [MED_UNITS]; unknown -> "mg". */
+fun normalizeMedUnit(s: String?): String {
+    val u = (parseDose(s).second ?: s ?: "").trim().lowercase()
+    return when (u) {
+        "mg" -> "mg"
+        "mcg", "µg", "μg", "ug" -> "mcg"
+        "g", "gram", "grams" -> "g"
+        "ml" -> "mL"
+        "iu" -> "IU"
+        "unit", "units" -> "units"
+        "drop", "drops" -> "drops"
+        "tab", "tabs", "tablet", "tablets" -> "tablets"
+        else -> "mg"
+    }
+}
+
 fun Entry.summary(): String {
     fun yn(b: Boolean?) = when (b) { true -> "Yes"; false -> "No"; null -> "-" }
     return buildString {

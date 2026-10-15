@@ -95,8 +95,8 @@ object Store {
         get() = prefs.getString("medName", "") ?: ""
         set(v) { prefs.edit().putString("medName", clean(v)).apply() }
     var medUnit: String
-        get() = prefs.getString("medUnit", "mg") ?: "mg"
-        set(v) { prefs.edit().putString("medUnit", clean(v)).apply() }
+        get() = normalizeMedUnit(prefs.getString("medUnit", null))
+        set(v) { prefs.edit().putString("medUnit", normalizeMedUnit(v)).apply() }
     /** Usual time taken, minutes since midnight (null = none). */
     var medUsualTime: Int?
         get() = if (prefs.contains("medUsualTime")) prefs.getInt("medUsualTime", 0) else null
@@ -118,8 +118,14 @@ object Store {
                 .map { parseDose(it) }.firstOrNull { it.first != null && it.second != null }?.second
             val e = prefs.edit().remove("medCurrentDose").remove("doses")
             if (n != null && !prefs.contains("medDoseNum")) e.putString("medDoseNum", fmtNum(n))
-            if (unit != null && !prefs.contains("medUnit")) e.putString("medUnit", clean(unit))
+            if (unit != null && !prefs.contains("medUnit")) e.putString("medUnit", normalizeMedUnit(unit))
             e.apply()
+        }
+        // Unit used to be free text; "5 mg" typed there means a dose of 5 mg.
+        prefs.getString("medUnit", null)?.let { raw ->
+            val n = parseDose(raw).first
+            if (n != null && !prefs.contains("medDoseNum")) prefs.edit().putString("medDoseNum", fmtNum(n)).apply()
+            if (raw != normalizeMedUnit(raw)) prefs.edit().putString("medUnit", normalizeMedUnit(raw)).apply()
         }
         _medDose.value = prefs.getString("medDoseNum", null)?.toDoubleOrNull()
     }
