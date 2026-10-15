@@ -345,13 +345,13 @@ private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggl
                 LabeledRow("Exercised today") {
                     Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(140.dp)) { vm.setExercise(idxToBool(it)) }
                 }
-                LabeledRow("Night sweats last night") {
+                LabeledRow("Night sweats") {
                     Segmented(YES_NO, boolToIdx(d.nightSweats), Modifier.width(140.dp)) { vm.setNightSweats(idxToBool(it)) }
                 }
-                LabeledRow("Alcohol yesterday") {
+                LabeledRow("Alcohol") {
                     Segmented(YES_NO, boolToIdx(d.alcohol), Modifier.width(140.dp)) { vm.setAlcohol(idxToBool(it)) }
                 }
-                LabeledRow("Cannabis yesterday") {
+                LabeledRow("Cannabis") {
                     Segmented(YES_NO, boolToIdx(d.cannabis), Modifier.width(140.dp)) { vm.setCannabis(idxToBool(it)) }
                 }
                 LabeledRow(if (unit.isBlank()) "Med dose" else "Med dose ($unit)") {
@@ -488,7 +488,7 @@ fun ChartScreen(vm: MainViewModel) {
                 SweatRowView("Night sweats on ${sweat.sweats} of ${sweat.nights} nights", null)
                 sweat.lines.forEach { SweatRowView(it.label, it.value) }
             }
-            Caption("Counts per calendar day, using the latest answer that day. Comparisons need at least 2 nights on each side. These are plain counts, not an explanation.")
+            Caption("Compared with the evening before. Counts per calendar day, using the latest answer that day. Comparisons need at least 2 nights on each side. These are plain counts, not an explanation.")
         }
     }
 }

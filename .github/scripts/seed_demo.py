@@ -27,6 +27,7 @@ def anxiety_at(h):
 
 
 lines = []
+prev_alcohol = False
 prev_mean = 4.0   # previous day's mean anxiety, nudges night sweats
 for back in range(14, -1, -1):
     day = today - back
@@ -38,7 +39,7 @@ for back in range(14, -1, -1):
     med_time = wake + 45
     alcohol = random.random() < 0.25
     cannabis = random.random() < 0.15
-    sweats = random.random() < (0.55 if alcohol else 0.15) + (0.2 if prev_mean >= 5 else 0)
+    sweats = random.random() < (0.55 if prev_alcohol else 0.15) + (0.2 if prev_mean >= 5 else 0)
     day_anx = []
     n = random.randint(3, 5)
     hours = sorted(random.sample(range(8, 22), n))
@@ -65,6 +66,7 @@ for back in range(14, -1, -1):
             ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
             b(sweats), b(alcohol), b(cannabis),
         ]))
+    prev_alcohol = alcohol
     if day_anx:
         prev_mean = sum(day_anx) / len(day_anx)
 

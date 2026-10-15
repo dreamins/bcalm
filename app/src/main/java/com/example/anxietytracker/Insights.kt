@@ -75,12 +75,26 @@ fun computeInsights(data: List<Entry>): Insights {
     fun cmp(label: String, a: List<Int>, b: List<Int>): DiffRow? =
         if (a.size >= 3 && b.size >= 3) DiffRow(label, a.size + b.size, a.average() - b.average()) else null
 
+    // Day-level alcohol/cannabis: latest answered entry of each calendar day.
+    fun dayFlag(pick: (Entry) -> Boolean?): Map<Long, Boolean> =
+        data.groupBy { it.dateTime.toLocalDate().toEpochDay() }.mapNotNull { (d, es) ->
+            es.sortedBy { it.ts }.lastOrNull { pick(it) != null }?.let { d to pick(it)!! }
+        }.toMap()
+    val alcDay = dayFlag { it.alcohol }
+    val canDay = dayFlag { it.cannabis }
+    fun sameDay(m: Map<Long, Boolean>, v: Boolean) =
+        vals { m[it.dateTime.toLocalDate().toEpochDay()] == v }
+    fun nextDay(m: Map<Long, Boolean>, v: Boolean) =
+        vals { m[it.dateTime.toLocalDate().toEpochDay() - 1] == v }
+
     val factors = listOfNotNull(
         cmp("After caffeine", vals { it.caffeine == true }, vals { it.caffeine == false }),
         cmp("Food in last 3h", vals { it.food == true }, vals { it.food == false }),
         cmp("Exercised that day", vals { it.exercise == true }, vals { it.exercise == false }),
-        cmp("After alcohol", vals { it.alcohol == true }, vals { it.alcohol == false }),
-        cmp("After cannabis", vals { it.cannabis == true }, vals { it.cannabis == false }),
+        cmp("Alcohol days", sameDay(alcDay, true), sameDay(alcDay, false)),
+        cmp("Day after alcohol", nextDay(alcDay, true), nextDay(alcDay, false)),
+        cmp("Cannabis days", sameDay(canDay, true), sameDay(canDay, false)),
+        cmp("Day after cannabis", nextDay(canDay, true), nextDay(canDay, false)),
         cmp("Partner tense vs good", vals { it.partner == 2 }, vals { it.partner == 0 }),
         cmp("Poor sleep (≤2 vs ≥4)", vals { (it.sleep ?: 99) <= 2 }, vals { (it.sleep ?: 0) >= 4 }),
     )
@@ -94,8 +108,8 @@ data class SweatInsights(val nights: Int, val sweats: Int, val lines: List<Sweat
 
 /**
  * Night-sweats summary over calendar days at or after [fromMs] (0 = all). A record on day D describes the
- * night before D, so the "day before" anxiety is day D-1, while alcohol/cannabis on the same record
- * describe that same night. One value per day: the latest entry of that day with the field set.
+ * night between D-1 and D, so the "day before" anxiety, alcohol, cannabis and medication dose come from
+ * day D-1 (dose falls back to D). One value per day: the latest entry of that day with the field set.
  * Returns null until at least 3 nights are answered.
  */
 fun computeSweatInsights(all: List<Entry>, fromMs: Long = 0L): SweatInsights? {
@@ -104,14 +118,17 @@ fun computeSweatInsights(all: List<Entry>, fromMs: Long = 0L): SweatInsights? {
         es.mapNotNull { it.anxiety }.takeIf { it.isNotEmpty() }?.let { d to it.average() }
     }.toMap()
     class Night(val day: Long, val sweat: Boolean, val alcohol: Boolean?, val cannabis: Boolean?, val dose: Entry?)
+    fun lastOn(d: Long, pick: (Entry) -> Boolean?): Boolean? =
+        byDay[d]?.sortedBy { it.ts }?.lastOrNull { pick(it) != null }?.let { pick(it) }
+    fun doseOn(d: Long): Entry? = byDay[d]?.sortedBy { it.ts }?.lastOrNull { it.medDose != null }
     val nights = byDay.toSortedMap().mapNotNull { (d, es) ->
         val sorted = es.sortedBy { it.ts }
         if (sorted.last().ts < fromMs) return@mapNotNull null
         val sweat = sorted.lastOrNull { it.nightSweats != null }?.nightSweats ?: return@mapNotNull null
         Night(d, sweat,
-            sorted.lastOrNull { it.alcohol != null }?.alcohol,
-            sorted.lastOrNull { it.cannabis != null }?.cannabis,
-            sorted.lastOrNull { it.medDose != null })
+            lastOn(d - 1) { it.alcohol },
+            lastOn(d - 1) { it.cannabis },
+            doseOn(d - 1) ?: doseOn(d))
     }
     if (nights.size < 3) return null
 

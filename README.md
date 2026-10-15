@@ -15,7 +15,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Tap to log.** Tap a number and the entry is saved at once with everything carried over from last time. An Undo bar appears, and for two minutes further changes on the Log screen update that entry instead of creating a new one.
 - **Today summary.** Wake time, sleep quality and exercise sit in one collapsible card and reset at midnight.
 - **Medication dose** is a number picked in the Today card (recent doses are one tap). It carries over day to day until you change it and is recorded with every entry. Name, unit and usual time are set once in Settings.
-- **Night sweats, alcohol and cannabis** are yes/no answers in the Today card ("Night sweats last night", "Alcohol yesterday", "Cannabis yesterday"), logged once in the morning. The Chart tab then shows a small plain-count summary of night sweats against alcohol, cannabis, the previous day's anxiety and medication dose.
+- **Night sweats, alcohol and cannabis** are yes/no answers in the Today card ("Night sweats", "Alcohol", "Cannabis"). Night sweats are answered in the morning; alcohol and cannabis are logged any time during the day and reset at midnight. The Chart tab then shows a small plain-count summary of night sweats against the previous evening's alcohol and cannabis, the previous day's anxiety and medication dose.
 - **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.

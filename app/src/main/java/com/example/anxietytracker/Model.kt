@@ -20,9 +20,9 @@ data class Draft(
     val sleepDay: Long = 0,
     val nightSweats: Boolean? = null,   // describes last night; logged in the morning
     val nightSweatsDay: Long = 0,
-    val alcohol: Boolean? = null,       // describes yesterday evening
+    val alcohol: Boolean? = null,       // describes today (the record day)
     val alcoholDay: Long = 0,
-    val cannabis: Boolean? = null,      // describes yesterday
+    val cannabis: Boolean? = null,      // describes today (the record day)
     val cannabisDay: Long = 0,
 ) {
     /** Daily fields whose last-set date isn't today show as unset. */
