@@ -2,7 +2,8 @@
 # Runs inside the emulator: installs the debug APK, seeds demo data, captures screenshots.
 set -euxo pipefail
 
-PKG=com.example.anxietytracker
+PKG=app.bcalm
+ACTIVITY=com.example.anxietytracker.MainActivity
 APK=app/build/outputs/apk/debug/app-debug.apk
 OUT=docs/screenshots
 WORK=$(mktemp -d)
@@ -42,7 +43,7 @@ adb shell am broadcast -a com.android.systemui.demo -e command notifications -e 
 NAMES=(log chart history settings)
 for i in 0 1 2 3; do
   adb shell am force-stop "$PKG"
-  adb shell am start -W -n "$PKG/.MainActivity" --ei tab "$i"
+  adb shell am start -W -n "$PKG/$ACTIVITY" --ei tab "$i"
   sleep 4
   # Dismiss any ANR/system dialog that popped up (keep the app in front)
   for _ in 1 2 3; do
@@ -51,7 +52,7 @@ for i in 0 1 2 3; do
       adb shell input keyevent KEYCODE_BACK || true
       sleep 2
       adb shell am force-stop "$PKG"
-      adb shell am start -W -n "$PKG/.MainActivity" --ei tab "$i"
+      adb shell am start -W -n "$PKG/$ACTIVITY" --ei tab "$i"
       sleep 3
     fi
   done
