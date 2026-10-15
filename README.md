@@ -10,16 +10,6 @@ A debug build is also available: [bcalm.apk](https://github.com/dreamins/bcalm/r
 
 Open it on your Android phone. You will need to allow "install unknown apps" for your browser (Android will prompt you). Android 8.0+.
 
-## Install via Google Play (private)
-
-1. Open Google AI Studio, go to Build, and choose Import from GitHub.
-2. Enter `dreamins/bcalm` and import the repository.
-3. Send it to Google Play, or install it on your device from there.
-
-Availability at launch is limited to US users aged 18+. The sideloaded release APK and the Play version share the app id `app.bcalm` but are signed differently (Play re-signs), so they can't update each other. To switch between them, use Settings -> Export CSV, uninstall, install the other one, then Import CSV.
-
-Each build on `main` also publishes `bcalm.aab` (signed bundle) and `bcalm-release.apk` to the release, for manual upload in the Play Console.
-
 ## Features
 
 - **Tap to log.** Tap a number and the entry is saved at once with everything carried over from last time. An Undo bar appears, and for two minutes further changes on the Log screen update that entry instead of creating a new one.
