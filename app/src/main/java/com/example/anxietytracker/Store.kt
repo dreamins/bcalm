@@ -150,6 +150,13 @@ object Store {
         val n = name.trim().replace(Regex("[;|,\n]"), " ").take(30)
         if (n.isNotEmpty() && _causeList.value.none { it.equals(n, true) }) saveCauses(_causeList.value + n)
     }
+    /** Adds causes found in imported entries that the list lacks (one write); returns how many. */
+    fun restoreCauses(list: List<Entry>): Int {
+        val have = _causeList.value.mapTo(HashSet()) { it.lowercase() }
+        val add = list.flatMap { it.causes }.map { it.trim() }.filter { it.isNotEmpty() && have.add(it.lowercase()) }
+        if (add.isNotEmpty()) saveCauses(_causeList.value + add)
+        return add.size
+    }
     fun removeCause(name: String) = saveCauses(_causeList.value - name)
 
     // ---- entries ----

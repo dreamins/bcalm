@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -618,6 +619,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var hours by remember { mutableIntStateOf(Store.intervalHours) }
     var medName by remember { mutableStateOf(Store.medName) }
+    val causeList by vm.causeList.collectAsStateWithLifecycle()
+    var addingCause by remember { mutableStateOf(false) }
+    var removingCause by remember { mutableStateOf<String?>(null) }
     var unit by remember { mutableStateOf(Store.medUnit) }
     var unitMenu by remember { mutableStateOf(false) }
     var doseText by remember { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }
@@ -636,7 +640,10 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                     val text = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
                     val list = Csv.parse(text)
                     if (list == null) "Not a valid CSV (no timestamp column)"
-                    else Store.importEntries(list).let { "Imported $it entries (${list.size - it} skipped)" }
+                    else Store.importEntries(list).let { n ->
+                        val k = Store.restoreCauses(list)
+                        "Imported $n entries (${list.size - n} skipped)" + if (k > 0) ", $k causes restored" else ""
+                    }
                 } catch (e: Exception) { "Import failed: ${e.message ?: e.javaClass.simpleName}" }
             }
             android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
@@ -693,6 +700,17 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
             }
         }
 
+        SettingsSection("Causes", "The \"What's going on?\" list on the Log screen. Past entries keep their causes.") {
+            causeList.forEach { c ->
+                LabeledRow(c) {
+                    IconButton(onClick = { removingCause = c }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Remove $c")
+                    }
+                }
+            }
+            TextButton(onClick = { addingCause = true }) { Text("Add cause…") }
+        }
+
         SettingsSection("Sync to Google Drive") {
             val target = syncUri
             if (target == null) {
@@ -732,6 +750,22 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
         val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
         Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp, bottom = 48.dp))
+    }
+
+    if (addingCause) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(onDismissRequest = { addingCause = false },
+            title = { Text("New cause") },
+            text = { OutlinedTextField(value = text, onValueChange = { text = it.take(30) }, singleLine = true,
+                shape = SmallShape) },
+            confirmButton = { TextButton(onClick = { vm.addCause(text); addingCause = false }) { Text("Add") } },
+            dismissButton = { TextButton(onClick = { addingCause = false }) { Text("Cancel") } })
+    }
+    removingCause?.let { c ->
+        AlertDialog(onDismissRequest = { removingCause = null },
+            title = { Text("Remove \"$c\" from the list?") },
+            confirmButton = { TextButton(onClick = { vm.removeCause(c); removingCause = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removingCause = null }) { Text("Keep") } })
     }
 
     if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {
