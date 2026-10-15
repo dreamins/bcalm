@@ -19,7 +19,22 @@ android {
         versionName = if (run == null) "1.0-dev" else "1.0.$run" + (sha?.let { "-$it" } ?: "")
     }
 
+    // Stable signing key from CI secrets so phone updates work; local builds keep the default debug key.
+    val ksPath = System.getenv("SIGNING_KEYSTORE")
+    val ksPassword = System.getenv("SIGNING_PASSWORD")
+    val bcalmSigning = if (ksPath != null && file(ksPath).isFile && ksPassword != null) {
+        signingConfigs.create("bcalm") {
+            storeFile = file(ksPath)
+            storePassword = ksPassword
+            keyAlias = "bcalm"
+            keyPassword = ksPassword
+        }
+    } else null
+
     buildTypes {
+        getByName("debug") {
+            if (bcalmSigning != null) signingConfig = bcalmSigning
+        }
         release {
             isMinifyEnabled = false
         }

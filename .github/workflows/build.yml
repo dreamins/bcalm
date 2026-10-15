@@ -13,6 +13,18 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
+      - name: Set up signing key
+        env:
+          KS: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          PW: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/bcalm.jks"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/bcalm.jks" >> "$GITHUB_ENV"
+            echo "SIGNING_PASSWORD=$PW" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 secret is missing; builds are signed with a random debug key and phone updates will fail."
+          fi
       - name: Build
         run: |
           chmod +x gradlew
