@@ -69,6 +69,10 @@ object Store {
         get() = prefs.getInt("intervalHours", 3)
         set(v) { prefs.edit().putInt("intervalHours", v).apply() }
 
+    var chartView: Int  // 0 = by hour of day, 1 = over time
+        get() = prefs.getInt("chartView", 0)
+        set(v) { prefs.edit().putInt("chartView", v).apply() }
+
     // ---- Drive/CSV sync target (a SAF document uri) and last result ----
     private val _syncUri = MutableStateFlow<String?>(null)
     val syncUri: StateFlow<String?> = _syncUri

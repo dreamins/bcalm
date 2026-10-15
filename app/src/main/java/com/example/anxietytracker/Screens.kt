@@ -35,6 +35,10 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -57,6 +61,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private val SmallShape = RoundedCornerShape(6.dp)
 
@@ -421,16 +427,26 @@ fun ChartScreen(vm: MainViewModel) {
     val ins = remember(data) { computeInsights(data) }
     val cs = MaterialTheme.colorScheme
     val ranges = listOf(7, 30, 0)
+    var view by remember { mutableIntStateOf(Store.chartView) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenTitle("Chart")
         Segmented(listOf("7 days", "30 days", "All"), ranges.indexOf(range), allowClear = false) {
             if (it != null) range = ranges[it]
         }
+        Segmented(listOf("By hour of day", "Over time"), view, allowClear = false) {
+            if (it != null) { view = it; Store.chartView = it }
+        }
         Text(ins.sentence, style = MaterialTheme.typography.bodyLarge)
         if (ins.count > 0) Caption("${ins.count} entries · average ${"%.1f".format(ins.avg)}")
-        AnxietyChart(data, Modifier.fillMaxWidth().height(220.dp))
-        Caption("Hour of day. Bars are the hourly average; dots are single entries.")
+        SectionHeader(if (view == 0) "Anxiety by hour of day" else "Anxiety over time")
+        if (view == 0) {
+            HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp))
+            Caption("Hour of day. Bars are the hourly average; dots are single entries.")
+        } else {
+            TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
+            Caption("Date. Line is the daily average; dots are single entries.")
+        }
 
         if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
             Spacer(Modifier.height(4.dp))
@@ -465,7 +481,7 @@ private fun PatternRow(label: String, count: String?, diff: Double) {
 
 /** Hourly mean bars (thin, accent at low alpha), faint dots for single entries, hairline baseline. */
 @Composable
-fun AnxietyChart(data: List<Entry>, modifier: Modifier) {
+fun HourOfDayChart(data: List<Entry>, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
     val cs = MaterialTheme.colorScheme
     val grid = cs.outlineVariant
@@ -505,6 +521,65 @@ fun AnxietyChart(data: List<Entry>, modifier: Modifier) {
         data.forEach { e ->
             drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
+        drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
+    }
+}
+
+/** Daily-average line (accent) over faint dots for single entries, on a date axis. */
+@Composable
+fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val cs = MaterialTheme.colorScheme
+    val grid = cs.outlineVariant
+    val baseline = cs.outline
+    val dot = cs.onSurfaceVariant.copy(alpha = 0.5f)
+    val line = cs.primary
+    val txt = cs.onSurfaceVariant
+    val fmt = remember { DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()) }
+    Canvas(modifier) {
+        val l = 28.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
+        val w = size.width - l - r; val h = size.height - t - b
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now()
+        val first = when {
+            range > 0 -> today.minusDays(range - 1L)
+            data.isEmpty() -> today
+            else -> minOf(today, data.minOf { it.dateTime.toLocalDate() })
+        }
+        val t0 = first.atStartOfDay(zone).toInstant().toEpochMilli()
+        val t1 = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val span = (t1 - t0).toFloat()
+        fun x(ts: Long) = l + w * (ts - t0) / span
+        fun y(a: Float) = t + h * (1 - a / 10f)   // baseline = 0, top = 10
+        val style = TextStyle(color = txt, fontSize = 10.sp)
+        for (a in listOf(1, 5, 10)) {
+            if (a > 1) drawLine(grid, Offset(l, y(a.toFloat())), Offset(l + w, y(a.toFloat())), 1.dp.toPx())
+            val m = measurer.measure("$a", style)
+            drawText(m, topLeft = Offset(l - m.size.width - 6.dp.toPx(), y(a.toFloat()) - m.size.height / 2f))
+        }
+        val days = (today.toEpochDay() - first.toEpochDay() + 1).toInt()
+        val step = (days + 4) / 5
+        var d = 0
+        while (d < days) {
+            val day = first.plusDays(d.toLong())
+            val m = measurer.measure(day.format(fmt), style)
+            val noon = x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli())
+            val lx = (noon - m.size.width / 2f).coerceIn(0f, size.width - m.size.width)
+            drawText(m, topLeft = Offset(lx, t + h + 6.dp.toPx()))
+            d += step
+        }
+        data.forEach { e ->
+            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.ts), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+        }
+        val pts = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
+            Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()),
+                y(es.map { it.anxiety!!.coerceIn(1, 10) }.average().toFloat()))
+        }
+        if (pts.size > 1) {
+            val path = Path().apply { moveTo(pts[0].x, pts[0].y); pts.drop(1).forEach { lineTo(it.x, it.y) } }
+            drawPath(path, line, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        pts.forEach { drawCircle(line, 3.dp.toPx(), it) }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
 }
