@@ -313,6 +313,9 @@ private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggl
         d.sleep?.let { "Slept $it/5" } ?: "Slept —",
         d.exercise?.let { if (it) "Exercised" else "No exercise" } ?: "Exercise —",
         dose?.let { "Med " + fmtDose(it, unit) },
+        if (d.nightSweats == true) "Night sweats" else null,
+        if (d.alcohol == true) "Alcohol" else null,
+        if (d.cannabis == true) "Cannabis" else null,
     ).joinToString(" · ")
     Column(Modifier.fillMaxWidth().border(1.dp, cs.outlineVariant, SmallShape)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(onClick = onToggle)
@@ -341,6 +344,15 @@ private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggl
                 Spacer(Modifier.height(4.dp))
                 LabeledRow("Exercised today") {
                     Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(140.dp)) { vm.setExercise(idxToBool(it)) }
+                }
+                LabeledRow("Night sweats last night") {
+                    Segmented(YES_NO, boolToIdx(d.nightSweats), Modifier.width(140.dp)) { vm.setNightSweats(idxToBool(it)) }
+                }
+                LabeledRow("Alcohol yesterday") {
+                    Segmented(YES_NO, boolToIdx(d.alcohol), Modifier.width(140.dp)) { vm.setAlcohol(idxToBool(it)) }
+                }
+                LabeledRow("Cannabis yesterday") {
+                    Segmented(YES_NO, boolToIdx(d.cannabis), Modifier.width(140.dp)) { vm.setCannabis(idxToBool(it)) }
                 }
                 LabeledRow(if (unit.isBlank()) "Med dose" else "Med dose ($unit)") {
                     if (doseOptions.isNotEmpty()) {
@@ -462,7 +474,35 @@ fun ChartScreen(vm: MainViewModel) {
             }
             Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).")
         }
+
+        val sweat = remember(all, range) {
+            val cutoff = if (range == 0) 0L else
+                LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            computeSweatInsights(all, cutoff)
+        }
+        if (sweat != null) {
+            Spacer(Modifier.height(4.dp))
+            SectionHeader("Night sweats")
+            Column {
+                HorizontalDivider(color = cs.outlineVariant)
+                SweatRowView("Night sweats on ${sweat.sweats} of ${sweat.nights} nights", null)
+                sweat.lines.forEach { SweatRowView(it.label, it.value) }
+            }
+            Caption("Counts per calendar day, using the latest answer that day. Comparisons need at least 2 nights on each side. These are plain counts, not an explanation.")
+        }
     }
+}
+
+@Composable
+private fun SweatRowView(label: String, value: String?) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(if (value == null) 1f else 0.4f), style = MaterialTheme.typography.bodyLarge)
+        if (value != null) Text(value, Modifier.weight(0.6f), textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+    }
+    HorizontalDivider(color = cs.outlineVariant)
 }
 
 @Composable
@@ -628,7 +668,12 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 val med = g.rows.asReversed()
                     .mapNotNull { e -> e.medLabel?.let { listOfNotNull(e.medName, it).joinToString(" ") } }.distinct()
                     .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
-                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med)
+                val sweats = g.rows.firstNotNullOfOrNull { it.nightSweats }
+                val alcohol = g.rows.firstNotNullOfOrNull { it.alcohol }
+                val cannabis = g.rows.firstNotNullOfOrNull { it.cannabis }
+                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med,
+                    if (sweats == true) "Night sweats" else null, if (alcohol == true) "Alcohol" else null,
+                    if (cannabis == true) "Cannabis" else null)
                     .joinToString(" · ")
                 Column(Modifier.fillMaxWidth().background(cs.background)) {
                     Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),

@@ -15,6 +15,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Tap to log.** Tap a number and the entry is saved at once with everything carried over from last time. An Undo bar appears, and for two minutes further changes on the Log screen update that entry instead of creating a new one.
 - **Today summary.** Wake time, sleep quality and exercise sit in one collapsible card and reset at midnight.
 - **Medication dose** is a number picked in the Today card (recent doses are one tap). It carries over day to day until you change it and is recorded with every entry. Name, unit and usual time are set once in Settings.
+- **Night sweats, alcohol and cannabis** are yes/no answers in the Today card ("Night sweats last night", "Alcohol yesterday", "Cannabis yesterday"), logged once in the morning. The Chart tab then shows a small plain-count summary of night sweats against alcohol, cannabis, the previous day's anxiety and medication dose.
 - **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
@@ -32,7 +33,7 @@ The screenshots use generated demo data.
 
 ## CSV columns
 
-`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name`
+`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis`
 
 `med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`.
 

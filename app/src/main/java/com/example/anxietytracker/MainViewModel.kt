@@ -60,6 +60,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setPartner(v: Int?) = update { it.copy(partner = v) }
     fun setWake(v: Int?) = update { it.copy(wakeMin = v, wakeDay = Store.today()) }
     fun setSleep(v: Int?) = update { it.copy(sleep = v, sleepDay = Store.today()) }
+    fun setNightSweats(v: Boolean?) = update { it.copy(nightSweats = v, nightSweatsDay = Store.today()) }
+    fun setAlcohol(v: Boolean?) = update { it.copy(alcohol = v, alcoholDay = Store.today()) }
+    fun setCannabis(v: Boolean?) = update { it.copy(cannabis = v, cannabisDay = Store.today()) }
     fun setMedDose(v: Double?) {
         Store.setMedDose(v)
         syncActive()

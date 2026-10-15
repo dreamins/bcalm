@@ -18,12 +18,21 @@ data class Draft(
     val wakeDay: Long = 0,
     val sleep: Int? = null,
     val sleepDay: Long = 0,
+    val nightSweats: Boolean? = null,   // describes last night; logged in the morning
+    val nightSweatsDay: Long = 0,
+    val alcohol: Boolean? = null,       // describes yesterday evening
+    val alcoholDay: Long = 0,
+    val cannabis: Boolean? = null,      // describes yesterday
+    val cannabisDay: Long = 0,
 ) {
     /** Daily fields whose last-set date isn't today show as unset. */
     fun normalized(today: Long = LocalDate.now().toEpochDay()): Draft = copy(
         exercise = if (exerciseDay == today) exercise else null,
         wakeMin = if (wakeDay == today) wakeMin else null,
         sleep = if (sleepDay == today) sleep else null,
+        nightSweats = if (nightSweatsDay == today) nightSweats else null,
+        alcohol = if (alcoholDay == today) alcohol else null,
+        cannabis = if (cannabisDay == today) cannabis else null,
     )
 }
 
@@ -41,6 +50,9 @@ data class Entry(
     val medTime: Int? = null,
     val medUnit: String? = null,
     val medName: String? = null,
+    val nightSweats: Boolean? = null,
+    val alcohol: Boolean? = null,
+    val cannabis: Boolean? = null,
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
@@ -112,7 +124,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -131,6 +143,7 @@ object Csv {
                 e.causes.joinToString(";").replace(",", " "),
                 e.medUnit?.replace(",", " ") ?: "",
                 e.medName?.replace(",", " ") ?: "",
+                b(e.nightSweats), b(e.alcohol), b(e.cannabis),
             ).joinToString(","))
             append('\n')
         }
@@ -157,6 +170,7 @@ object Csv {
                 min("wake_time"), col("sleep_quality")?.toIntOrNull(),
                 col("causes")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
                 dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
+                bool("night_sweats"), bool("alcohol"), bool("cannabis"),
             )
         }
         return out

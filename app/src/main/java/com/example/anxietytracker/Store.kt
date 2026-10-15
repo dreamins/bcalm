@@ -41,6 +41,9 @@ object Store {
             partner = i("partner"),
             wakeMin = i("wakeMin"), wakeDay = prefs.getLong("wakeDay", 0),
             sleep = i("sleep"), sleepDay = prefs.getLong("sleepDay", 0),
+            nightSweats = b("nightSweats"), nightSweatsDay = prefs.getLong("nightSweatsDay", 0),
+            alcohol = b("alcohol"), alcoholDay = prefs.getLong("alcoholDay", 0),
+            cannabis = b("cannabis"), cannabisDay = prefs.getLong("cannabisDay", 0),
         ).normalized()
     }
 
@@ -50,9 +53,13 @@ object Store {
         put("anxiety", d.anxiety); put("caffeine", d.caffeine?.let { if (it) 1 else 0 })
         put("food", d.food?.let { if (it) 1 else 0 })
         put("exercise", d.exercise?.let { if (it) 1 else 0 })
+        put("nightSweats", d.nightSweats?.let { if (it) 1 else 0 })
+        put("alcohol", d.alcohol?.let { if (it) 1 else 0 })
+        put("cannabis", d.cannabis?.let { if (it) 1 else 0 })
         put("partner", d.partner); put("wakeMin", d.wakeMin); put("sleep", d.sleep)
         e.putLong("exerciseDay", d.exerciseDay).putLong("wakeDay", d.wakeDay)
-            .putLong("sleepDay", d.sleepDay).apply()
+            .putLong("sleepDay", d.sleepDay).putLong("nightSweatsDay", d.nightSweatsDay)
+            .putLong("alcoholDay", d.alcoholDay).putLong("cannabisDay", d.cannabisDay).apply()
     }
 
     // ---- "Today" card open/closed choice (valid for the day it was made) ----
@@ -168,7 +175,7 @@ object Store {
         val n = d.normalized()
         return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes,
             _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } },
-            _medDose.value?.let { medName.ifBlank { null } })
+            _medDose.value?.let { medName.ifBlank { null } }, n.nightSweats, n.alcohol, n.cannabis)
     }
 
     @Synchronized
@@ -238,7 +245,7 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "").joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis)).joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -257,7 +264,10 @@ object Store {
                 p.getOrNull(8)?.split(";")?.filter { it.isNotBlank() } ?: emptyList(),
                 dose, p.getOrNull(10)?.let { i(it) },
                 p.getOrNull(11)?.takeIf { it.isNotBlank() } ?: legacyUnit,
-                p.getOrNull(12)?.takeIf { it.isNotBlank() })
+                p.getOrNull(12)?.takeIf { it.isNotBlank() },
+                p.getOrNull(13)?.let { i(it) }?.let { it == 1 },
+                p.getOrNull(14)?.let { i(it) }?.let { it == 1 },
+                p.getOrNull(15)?.let { i(it) }?.let { it == 1 })
         }.sortedBy { it.ts }
     }
 }

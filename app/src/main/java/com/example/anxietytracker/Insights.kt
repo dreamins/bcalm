@@ -79,8 +79,72 @@ fun computeInsights(data: List<Entry>): Insights {
         cmp("After caffeine", vals { it.caffeine == true }, vals { it.caffeine == false }),
         cmp("Food in last 3h", vals { it.food == true }, vals { it.food == false }),
         cmp("Exercised that day", vals { it.exercise == true }, vals { it.exercise == false }),
+        cmp("After alcohol", vals { it.alcohol == true }, vals { it.alcohol == false }),
+        cmp("After cannabis", vals { it.cannabis == true }, vals { it.cannabis == false }),
         cmp("Partner tense vs good", vals { it.partner == 2 }, vals { it.partner == 0 }),
         cmp("Poor sleep (≤2 vs ≥4)", vals { (it.sleep ?: 99) <= 2 }, vals { (it.sleep ?: 0) >= 4 }),
     )
     return Insights(n, avg, sentence, causes, other, factors)
+}
+
+/** One line of the night-sweats section: label on the left, plain-text value on the right. */
+data class SweatLine(val label: String, val value: String)
+
+data class SweatInsights(val nights: Int, val sweats: Int, val lines: List<SweatLine>)
+
+/**
+ * Night-sweats summary over calendar days at or after [fromMs] (0 = all). A record on day D describes the
+ * night before D, so the "day before" anxiety is day D-1, while alcohol/cannabis on the same record
+ * describe that same night. One value per day: the latest entry of that day with the field set.
+ * Returns null until at least 3 nights are answered.
+ */
+fun computeSweatInsights(all: List<Entry>, fromMs: Long = 0L): SweatInsights? {
+    val byDay = all.groupBy { it.dateTime.toLocalDate().toEpochDay() }
+    val anxDay = byDay.mapNotNull { (d, es) ->
+        es.mapNotNull { it.anxiety }.takeIf { it.isNotEmpty() }?.let { d to it.average() }
+    }.toMap()
+    class Night(val day: Long, val sweat: Boolean, val alcohol: Boolean?, val cannabis: Boolean?, val dose: Entry?)
+    val nights = byDay.toSortedMap().mapNotNull { (d, es) ->
+        val sorted = es.sortedBy { it.ts }
+        if (sorted.last().ts < fromMs) return@mapNotNull null
+        val sweat = sorted.lastOrNull { it.nightSweats != null }?.nightSweats ?: return@mapNotNull null
+        Night(d, sweat,
+            sorted.lastOrNull { it.alcohol != null }?.alcohol,
+            sorted.lastOrNull { it.cannabis != null }?.cannabis,
+            sorted.lastOrNull { it.medDose != null })
+    }
+    if (nights.size < 3) return null
+
+    fun rate(l: List<Night>) = "${l.count { it.sweat }}/${l.size}"
+    fun pct(l: List<Night>) = "${Math.round(100.0 * l.count { it.sweat } / l.size)}%"
+    fun yesNo(label: String, pick: (Night) -> Boolean?): SweatLine? {
+        val y = nights.filter { pick(it) == true }
+        val n = nights.filter { pick(it) == false }
+        return if (y.size >= 2 && n.size >= 2)
+            SweatLine(label, "${pct(y)} vs ${pct(n)}  (${rate(y)} vs ${rate(n)})") else null
+    }
+
+    val lines = ArrayList<SweatLine>()
+    yesNo("After alcohol") { it.alcohol }?.let { lines += it }
+    yesNo("After cannabis") { it.cannabis }?.let { lines += it }
+
+    val prevS = nights.filter { it.sweat }.mapNotNull { anxDay[it.day - 1] }
+    val prevN = nights.filter { !it.sweat }.mapNotNull { anxDay[it.day - 1] }
+    if (prevS.size >= 2 && prevN.size >= 2)
+        lines += SweatLine("Higher-anxiety days",
+            "avg ${"%.1f".format(prevS.average())} vs ${"%.1f".format(prevN.average())} the day before")
+
+    val byDose = nights.mapNotNull { n ->
+        val e = n.dose
+        val v = e?.medDose
+        val lbl = e?.medLabel
+        if (v == null || lbl == null) null else (v to lbl) to n
+    }.groupBy({ it.first }, { it.second })
+        .filter { it.value.size >= 2 }
+        .toSortedMap(compareBy<Pair<Double, String>>({ it.first }, { it.second }))
+    if (byDose.size >= 2)
+        lines += SweatLine("By medication dose",
+            byDose.entries.joinToString(" · ") { "${it.key.second} ${rate(it.value)}" })
+
+    return SweatInsights(nights.size, nights.count { it.sweat }, lines)
 }

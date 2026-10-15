@@ -3,7 +3,7 @@
 
 usage: seed_demo.py OUTDIR TZ_OFFSET_MINUTES
 Formats mirror Store.kt: entries are '|' joined lines
-ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName
+ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|alcohol|cannabis
 and prefs live in shared_prefs/draft.xml.
 """
 import os
@@ -27,6 +27,7 @@ def anxiety_at(h):
 
 
 lines = []
+prev_mean = 4.0   # previous day's mean anxiety, nudges night sweats
 for back in range(14, -1, -1):
     day = today - back
     wake = random.choice([405, 420, 435, 450])
@@ -35,6 +36,10 @@ for back in range(14, -1, -1):
     took_med = random.random() < 0.85
     day_dose = "10" if back > 5 else "15"
     med_time = wake + 45
+    alcohol = random.random() < 0.25
+    cannabis = random.random() < 0.15
+    sweats = random.random() < (0.55 if alcohol else 0.15) + (0.2 if prev_mean >= 5 else 0)
+    day_anx = []
     n = random.randint(3, 5)
     hours = sorted(random.sample(range(8, 22), n))
     for h in hours:
@@ -44,6 +49,7 @@ for back in range(14, -1, -1):
         if ts > now_ms - 60000:
             continue
         a = anxiety_at(h)
+        day_anx.append(a)
         if a >= 6:
             cs = random.sample(causes_pool[:3], random.randint(1, 2))
         elif a >= 4:
@@ -57,7 +63,10 @@ for back in range(14, -1, -1):
             str(ts), str(a), b(random.random() < 0.6), b(random.random() < 0.7),
             b(exercise and h >= 12), str(random.choice([0, 0, 1, 2])), str(wake), str(sleep),
             ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
+            b(sweats), b(alcohol), b(cannabis),
         ]))
+    if day_anx:
+        prev_mean = sum(day_anx) / len(day_anx)
 
 os.makedirs(out, exist_ok=True)
 with open(os.path.join(out, "entries.txt"), "w") as fh:
@@ -68,6 +77,9 @@ prefs = [
     ("long", "exerciseDay", today), ("int", "partner", 1),
     ("int", "wakeMin", 420), ("long", "wakeDay", today),
     ("int", "sleep", 3), ("long", "sleepDay", today),
+    ("int", "nightSweats", 1), ("long", "nightSweatsDay", today),
+    ("int", "alcohol", 1), ("long", "alcoholDay", today),
+    ("int", "cannabis", 0), ("long", "cannabisDay", today),
     ("string", "medDoseNum", "15.0"), ("string", "medUnit", "mg"), ("int", "medUsualTime", 480),
     ("int", "intervalHours", 3),
     ("string", "medName", ""),
