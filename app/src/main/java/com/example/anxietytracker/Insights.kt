@@ -37,8 +37,12 @@ fun windowLabel(start: Int): String {
     return if (a == b) "${hr12(start)}–${hr12(end)} $a" else "${hr12(start)} $a–${hr12(end)} $b"
 }
 
-/** [data] must only hold entries with a non-null anxiety value. */
-fun computeInsights(data: List<Entry>): Insights {
+/**
+ * [all] may include entries without an anxiety value: those are ignored for anxiety averages but still
+ * supply the day-level flags (alcohol, cannabis).
+ */
+fun computeInsights(all: List<Entry>): Insights {
+    val data = all.filter { it.anxiety != null }
     val n = data.size
     val avg = if (n == 0) 0.0 else data.map { it.anxiety!! }.average()
 
@@ -77,7 +81,7 @@ fun computeInsights(data: List<Entry>): Insights {
 
     // Day-level alcohol/cannabis: latest answered entry of each calendar day.
     fun dayFlag(pick: (Entry) -> Boolean?): Map<Long, Boolean> =
-        data.groupBy { it.dateTime.toLocalDate().toEpochDay() }.mapNotNull { (d, es) ->
+        all.groupBy { it.dateTime.toLocalDate().toEpochDay() }.mapNotNull { (d, es) ->
             es.sortedBy { it.ts }.lastOrNull { pick(it) != null }?.let { d to pick(it)!! }
         }.toMap()
     val alcDay = dayFlag { it.alcohol }

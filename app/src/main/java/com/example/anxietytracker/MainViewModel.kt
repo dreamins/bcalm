@@ -5,8 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 
 /** Outcome of tapping a number: a message for the snackbar and a way to undo it. */
@@ -33,6 +36,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val activeEntry: StateFlow<Entry?> = _active
     private var expireJob: Job? = null
 
+    /** Snackbar messages for entries logged by a non-anxiety change (shown by the Log screen). */
+    private val _logEvents = MutableSharedFlow<LogResult>(extraBufferCapacity = 8)
+    val logEvents: SharedFlow<LogResult> = _logEvents.asSharedFlow()
+
     /** User's explicit open/closed choice for the "Today" card today (null = automatic). */
     private val _todayOpen = MutableStateFlow(Store.loadTodayOpen())
     val todayOpen: StateFlow<Boolean?> = _todayOpen
@@ -49,10 +56,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun update(f: (Draft) -> Draft) {
-        val d = f(_draft.value)
+        liveActive()
+        val prevDraft = _draft.value
+        val prevCauses = _causes.value
+        val d = f(prevDraft)
         _draft.value = d
         Store.saveDraft(d)
-        syncActive()
+        afterChange(prevDraft, prevCauses)
     }
     fun setCaffeine(v: Boolean?) = update { it.copy(caffeine = v) }
     fun setFood(v: Boolean?) = update { it.copy(food = v) }
@@ -64,23 +74,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setAlcohol(v: Boolean?) = update { it.copy(alcohol = v, alcoholDay = Store.today()) }
     fun setCannabis(v: Boolean?) = update { it.copy(cannabis = v, cannabisDay = Store.today()) }
     fun setMedDose(v: Double?) {
-        Store.setMedDose(v)
-        syncActive()
+        Store.setMedDose(v)   // a setting only: neither logs an entry nor touches an open one
     }
 
     fun toggleCause(c: String) {
-        _causes.value = _causes.value.let { if (c in it) it - c else it + c }
-        syncActive()
+        liveActive()
+        val prevCauses = _causes.value
+        _causes.value = prevCauses.let { if (c in it) it - c else it + c }
+        afterChange(_draft.value, prevCauses)
     }
     fun addCause(c: String) {
+        liveActive()
+        val prevCauses = _causes.value
         Store.addCause(c)
-        _causes.value = _causes.value + c.trim().replace(Regex("[;|,\n]"), " ").take(30)
-        syncActive()
+        _causes.value = prevCauses + c.trim().replace(Regex("[;|,\n]"), " ").take(30)
+        afterChange(_draft.value, prevCauses)
     }
     fun removeCause(c: String) {
         Store.removeCause(c)
         _causes.value = _causes.value - c
-        syncActive()
+        syncActive()   // list management only: updates an open entry but never logs a new one
     }
 
     // ---- tap-to-log ----
@@ -128,10 +141,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         arm(e)
     }
 
-    /** Re-saves the open entry with the current draft + causes (keeps its timestamp). */
+    /** Re-saves the open entry with the current draft + causes (keeps its timestamp and anxiety value). */
     private fun syncActive() {
         val a = liveActive() ?: return
-        commit(Store.entryFrom(_draft.value, orderedCauses(), a.ts))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts))
+    }
+
+    /** A non-anxiety change was made: update the open entry, or log a new one without anxiety. */
+    private fun afterChange(prevDraft: Draft, prevCauses: Set<String>) {
+        if (liveActive() != null) { syncActive(); return }
+        val e = Store.entryFrom(_draft.value.copy(anxiety = null), orderedCauses(), newTs())
+        Store.add(e)
+        Reminders.cancelNotification(getApplication())
+        arm(e)
+        _logEvents.tryEmit(LogResult("Logged without anxiety level") {
+            Store.delete(e)
+            if (_active.value?.ts == e.ts) {
+                expireJob?.cancel()
+                expireJob = null
+                _active.value = null
+            }
+            _causes.value = prevCauses
+            restoreDraft(prevDraft)
+        })
     }
 
     private fun restoreDraft(d: Draft) {
@@ -164,7 +196,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         commit(e)
-        return LogResult("Updated to $n") {
+        return LogResult(if (a.anxiety == null) "Logged $n" else "Updated to $n") {
             if (_active.value?.ts == a.ts) commit(a)
             restoreDraft(prevDraft)
         }

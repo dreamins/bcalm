@@ -149,12 +149,11 @@ private fun Caption(t: String, modifier: Modifier = Modifier) =
 /**
  * The one control for choosing among a few options: a hairline-outlined segmented row.
  * Selected = solid accent with white text. Tapping the selected option clears it when [allowClear].
- * [hint] marks a carried-over (not yet confirmed) value with bold accent text.
  */
 @Composable
 fun Segmented(
     options: List<String>, selected: Int?, modifier: Modifier = Modifier,
-    height: Dp = 44.dp, allowClear: Boolean = true, hint: Int? = null,
+    height: Dp = 44.dp, allowClear: Boolean = true,
     textSize: Int = 15, onPick: (Int?) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -172,12 +171,8 @@ fun Segmented(
                         onClick = { onPick(if (sel && allowClear) null else i) }),
                 contentAlignment = Alignment.Center,
             ) {
-                val isHint = !sel && hint == i
                 Text(label, maxLines = 1, fontSize = textSize.sp,
-                    fontWeight = if (isHint) FontWeight.Bold else FontWeight.Normal,
-                    color = if (sel) cs.onPrimary else if (isHint) cs.primary else cs.onSurface)
-                if (isHint) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp)
-                    .width(16.dp).height(2.dp).background(cs.primary))
+                    color = if (sel) cs.onPrimary else cs.onSurface)
             }
         }
     }
@@ -235,8 +230,17 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
 
     val active = activeEntry
     val last = entries.lastOrNull()
+    LaunchedEffect(Unit) {
+        vm.logEvents.collect { r ->
+            scope.launch {
+                snack.currentSnackbarData?.dismiss()
+                val res = snack.showSnackbar(r.message, actionLabel = "Undo", duration = SnackbarDuration.Short)
+                if (res == SnackbarResult.ActionPerformed) r.undo()
+            }
+        }
+    }
     val status = when {
-        active != null -> "Logged ${active.anxiety} at ${active.dateTime.format(timeFmt)} — changes update this entry"
+        active != null -> "Logged ${active.anxiety?.let { "$it " } ?: ""}at ${active.dateTime.format(timeFmt)} — changes update this entry"
         last != null -> {
             val m = ((now - last.ts) / 60000).coerceAtLeast(0)
             "Last logged " + when {
@@ -258,7 +262,6 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             Segmented(
                 options = (1..10).map { it.toString() },
                 selected = active?.anxiety?.minus(1),
-                hint = if (active == null) d.anxiety?.minus(1) else null,
                 height = 52.dp, allowClear = false, textSize = 17,
             ) { i ->
                 if (i != null) {
@@ -440,7 +443,11 @@ fun ChartScreen(vm: MainViewModel) {
             LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         all.filter { it.anxiety != null && it.ts >= cutoff }
     }
-    val ins = remember(data) { computeInsights(data) }
+    val ins = remember(all, range) {
+        val cutoff = if (range == 0) 0L else
+            LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        computeInsights(all.filter { it.ts >= cutoff })
+    }
     val cs = MaterialTheme.colorScheme
     val ranges = listOf(7, 30, 0)
     var view by remember { mutableIntStateOf(Store.chartView) }
