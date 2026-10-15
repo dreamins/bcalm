@@ -21,6 +21,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
 - **Insights chart.** Hourly average bars with single entries as dots, a plain-language note on your hardest time of day, and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
+- **Check for updates** in Settings compares your installed version with the latest release and links to the download. It only runs when you tap it.
 - **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once.
 
 ## Screenshots
@@ -39,7 +40,7 @@ The screenshots use generated demo data.
 
 ## Privacy
 
-All data stays on your device unless you export it or turn on sync to a file you chose.
+All data stays on your device unless you export it or turn on sync to a file you chose (the Drive app does that upload, not this app). The only network call the app makes is the manual "Check for updates" in Settings.
 
 ## Build
 

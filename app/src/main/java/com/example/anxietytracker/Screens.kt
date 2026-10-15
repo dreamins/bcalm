@@ -63,6 +63,10 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.core.content.pm.PackageInfoCompat
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 private val SmallShape = RoundedCornerShape(6.dp)
 
@@ -338,11 +342,11 @@ private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggl
                     }) { Text("Now") }
                     if (d.wakeMin != null) TextButton(onClick = { vm.setWake(null) }) { Text("Clear") }
                 }
-                Text("Sleep quality last night", style = MaterialTheme.typography.bodyLarge,
+                Text("Sleep quality", style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
                 Segmented((1..5).map { it.toString() }, d.sleep?.minus(1)) { vm.setSleep(it?.plus(1)) }
                 Spacer(Modifier.height(4.dp))
-                LabeledRow("Exercised today") {
+                LabeledRow("Exercise") {
                     Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(140.dp)) { vm.setExercise(idxToBool(it)) }
                 }
                 LabeledRow("Night sweats") {
@@ -869,7 +873,10 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
         val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
-        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp, bottom = 48.dp))
+        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp))
+        UpdateCheckRow(ctx, PackageInfoCompat.getLongVersionCode(info))
+        Caption("Updates are only checked when you tap the button; the app makes no other network calls.",
+            Modifier.padding(bottom = 48.dp))
     }
 
     if (addingCause) {
@@ -890,5 +897,82 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
     if (showTime) TimeDialog(usualTime ?: 480, { showTime = false }) {
         usualTime = it; Store.medUsualTime = it; showTime = false
+    }
+}
+
+private const val UPDATE_JSON_URL = "https://github.com/dreamins/bcalm/releases/download/latest/version.json"
+
+private sealed interface UpdateState {
+    object Idle : UpdateState
+    object Checking : UpdateState
+    object UpToDate : UpdateState
+    class Available(val versionName: String, val apk: String) : UpdateState
+    class Failed(val reason: String) : UpdateState
+}
+
+/** Fetches [url] as text, following up to 5 redirects manually (GitHub redirects across hosts). */
+private fun httpGetText(url: String): String {
+    var current = url
+    repeat(6) {
+        val conn = URL(current).openConnection() as HttpURLConnection
+        try {
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 10_000
+            val code = conn.responseCode
+            if (code in intArrayOf(301, 302, 303, 307, 308)) {
+                val loc = conn.getHeaderField("Location") ?: throw java.io.IOException("redirect without location")
+                current = URL(URL(current), loc).toString()
+            } else if (code == 200) {
+                return conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                throw java.io.IOException("HTTP $code")
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+    throw java.io.IOException("too many redirects")
+}
+
+private fun checkForUpdate(installed: Long): UpdateState = try {
+    val json = JSONObject(httpGetText(UPDATE_JSON_URL))
+    val code = json.getLong("versionCode")
+    if (code > installed) UpdateState.Available(json.optString("versionName", code.toString()), json.getString("apk"))
+    else UpdateState.UpToDate
+} catch (e: Exception) {
+    UpdateState.Failed(e.message?.take(60) ?: e.javaClass.simpleName)
+}
+
+@Composable
+private fun UpdateCheckRow(ctx: android.content.Context, installed: Long) {
+    var state by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+    val scope = rememberCoroutineScope()
+    val cs = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = {
+            if (state !is UpdateState.Checking) {
+                state = UpdateState.Checking
+                scope.launch { state = withContext(Dispatchers.IO) { checkForUpdate(installed) } }
+            }
+        }) { Text("Check for updates") }
+        when (val st = state) {
+            UpdateState.Idle -> {}
+            UpdateState.Checking -> Caption("Checking…")
+            UpdateState.UpToDate -> Caption("You're up to date")
+            is UpdateState.Available -> {
+                Caption("Update available: ${st.versionName}")
+                TextButton(onClick = {
+                    try {
+                        ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(st.apk)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (e: Exception) {
+                        state = UpdateState.Failed("no app to open the link")
+                    }
+                }) { Text("Download") }
+            }
+            is UpdateState.Failed -> Text("Couldn't check: ${st.reason}",
+                style = MaterialTheme.typography.bodySmall, color = cs.error)
+        }
     }
 }

@@ -54,6 +54,9 @@ jobs:
             cp "$RAPK" bcalm-release.apk
             cp "$RAAB" bcalm.aab
             gh release upload latest bcalm-release.apk bcalm.aab --clobber
+            printf '{"versionCode": %s, "versionName": "1.0.%s-%s", "apk": "https://github.com/dreamins/bcalm/releases/download/latest/bcalm-release.apk"}\n' \
+              "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_NUMBER" "${GITHUB_SHA::7}" > version.json
+            gh release upload latest version.json --clobber
           else
             echo "::warning::Signed release APK/AAB not found (signing secret missing?); skipping bcalm-release.apk and bcalm.aab upload."
           fi
