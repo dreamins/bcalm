@@ -4,7 +4,9 @@ A low-friction anxiety and trigger logger for spotting patterns in your day.
 
 ## Install
 
-Download the latest debug build: [bcalm.apk](https://github.com/dreamins/bcalm/releases/download/latest/bcalm.apk)
+Download the latest build: **[bcalm-release.apk](https://github.com/dreamins/bcalm/releases/download/latest/bcalm-release.apk)** (signed; future builds install over it as updates and keep your data).
+
+A debug build is also available: [bcalm.apk](https://github.com/dreamins/bcalm/releases/download/latest/bcalm.apk).
 
 Open it on your Android phone. You will need to allow "install unknown apps" for your browser (Android will prompt you). Android 8.0+.
 
@@ -14,7 +16,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 2. Enter `dreamins/bcalm` and import the repository.
 3. Send it to Google Play, or install it on your device from there.
 
-Availability at launch is limited to US users aged 18+. The Play version is a separate app (id `app.bcalm`) from the sideloaded APK, so it starts empty. To move your data, use Settings -> Export CSV in the old app, import that CSV in the new one, then uninstall the old one.
+Availability at launch is limited to US users aged 18+. The sideloaded release APK and the Play version share the app id `app.bcalm` but are signed differently (Play re-signs), so they can't update each other. To switch between them, use Settings -> Export CSV, uninstall, install the other one, then Import CSV.
 
 Each build on `main` also publishes `bcalm.aab` (signed bundle) and `bcalm-release.apk` to the release, for manual upload in the Play Console.
 
