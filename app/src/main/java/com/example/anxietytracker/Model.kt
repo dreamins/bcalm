@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /** Partner: 0 = good, 1 = neutral, 2 = tense. Booleans/ints are null when unset. */
@@ -53,14 +54,30 @@ data class Entry(
     val nightSweats: Boolean? = null,
     val alcohol: Boolean? = null,
     val cannabis: Boolean? = null,
+    val offsetMin: Int? = null,   // UTC offset (minutes) where it was logged; null = device zone
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
     val dateTime: LocalDateTime
-        get() = LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.systemDefault())
+        get() = LocalDateTime.ofInstant(Instant.ofEpochMilli(ts),
+            offsetMin?.let { ZoneOffset.ofTotalSeconds(it * 60) } ?: ZoneId.systemDefault())
 
     val hourOfDay: Float get() = dateTime.let { it.hour + it.minute / 60f }
+
+    /** Hours after waking (0..20); null without a wake time or when later than 20 h. */
+    val hoursSinceWake: Float?
+        get() {
+            val w = wakeMin ?: return null
+            val dt = dateTime
+            var m = dt.hour * 60 + dt.minute - w
+            if (m < 0) m += 1440
+            return (m / 60f).takeIf { it <= 20f }
+        }
 }
+
+/** UTC offset in minutes of the device zone at [ts]. */
+fun localOffsetMin(ts: Long): Int =
+    ZoneId.systemDefault().rules.getOffset(Instant.ofEpochMilli(ts)).totalSeconds / 60
 
 /** Stored/CSV form (lowercase, keep stable). */
 val PARTNER_LABELS = listOf("good", "neutral", "tense")
@@ -124,7 +141,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -144,6 +161,7 @@ object Csv {
                 e.medUnit?.replace(",", " ") ?: "",
                 e.medName?.replace(",", " ") ?: "",
                 b(e.nightSweats), b(e.alcohol), b(e.cannabis),
+                e.offsetMin?.toString() ?: "",
             ).joinToString(","))
             append('\n')
         }
@@ -160,8 +178,11 @@ object Csv {
             fun col(n: String) = head.indexOf(n).let { if (it >= 0) f.getOrNull(it) else null }?.ifEmpty { null }
             fun bool(n: String) = when (col(n)) { "1" -> true; "0" -> false; else -> null }
             fun min(n: String) = col(n)?.split(":")?.let { (it.getOrNull(0)?.toIntOrNull() ?: return@let null) * 60 + (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+            val off = col("utc_offset")?.toIntOrNull()
             val ts = try {
-                LocalDateTime.parse(col("timestamp") ?: continue, dt).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                val ldt = LocalDateTime.parse(col("timestamp") ?: continue, dt)
+                if (off != null) ldt.toInstant(ZoneOffset.ofTotalSeconds(off * 60)).toEpochMilli()
+                else ldt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             } catch (e: Exception) { continue }
             val (dose, legacyUnit) = parseDose(col("med_dose"))
             out += Entry(
@@ -170,7 +191,7 @@ object Csv {
                 min("wake_time"), col("sleep_quality")?.toIntOrNull(),
                 col("causes")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
                 dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
-                bool("night_sweats"), bool("alcohol"), bool("cannabis"),
+                bool("night_sweats"), bool("alcohol"), bool("cannabis"), off,
             )
         }
         return out

@@ -144,7 +144,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-saves the open entry with the current draft + causes (keeps its timestamp and anxiety value). */
     private fun syncActive() {
         val a = liveActive() ?: return
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin))
     }
 
     /** A non-anxiety change was made: update the open entry, or log a new one without anxiety. */
@@ -182,7 +182,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val d = prevDraft.copy(anxiety = n)
         _draft.value = d
         Store.saveDraft(d)
-        val e = Store.entryFrom(d, orderedCauses(), a?.ts ?: newTs())
+        val ts = a?.ts ?: newTs()
+        val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts))
         if (a == null) {
             Store.add(e)
             Reminders.cancelNotification(getApplication())

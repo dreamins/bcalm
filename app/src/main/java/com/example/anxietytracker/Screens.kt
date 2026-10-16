@@ -457,15 +457,19 @@ fun ChartScreen(vm: MainViewModel) {
         Segmented(listOf("7 days", "30 days", "All"), ranges.indexOf(range), allowClear = false) {
             if (it != null) range = ranges[it]
         }
-        Segmented(listOf("By hour of day", "Over time"), view, allowClear = false) {
+        Segmented(listOf("Time of day", "Since waking", "Over time"), view, allowClear = false) {
             if (it != null) { view = it; Store.chartView = it }
         }
-        Text(ins.sentence, style = MaterialTheme.typography.bodyLarge)
+        Text(if (view == 1) ins.wakeSentence else ins.sentence, style = MaterialTheme.typography.bodyLarge)
         if (ins.count > 0) Caption("${ins.count} entries · average ${"%.1f".format(ins.avg)}")
-        SectionHeader(if (view == 0) "Anxiety by hour of day" else "Anxiety over time")
+        SectionHeader(when (view) { 0 -> "Anxiety by hour of day"; 1 -> "Anxiety since waking"; else -> "Anxiety over time" })
         if (view == 0) {
             HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp))
-            Caption("Hour of day. Bars are the hourly average; dots are single entries.")
+            Caption("Hour of day, in local time where logged. Bars are the hourly average; dots are single entries.")
+        } else if (view == 1) {
+            val wakeData = remember(data) { data.filter { it.hoursSinceWake != null } }
+            HourOfDayChart(wakeData, Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4) { "${it}h" }
+            Caption("Hours since waking. Needs a wake time on the entry. Bars are the hourly average; dots are single entries.")
         } else {
             TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
             Caption("Date. Line is the daily average; dots are single entries.")
@@ -532,7 +536,11 @@ private fun PatternRow(label: String, count: String?, diff: Double) {
 
 /** Hourly mean bars (thin, accent at low alpha), faint dots for single entries, hairline baseline. */
 @Composable
-fun HourOfDayChart(data: List<Entry>, modifier: Modifier) {
+fun HourOfDayChart(
+    data: List<Entry>, modifier: Modifier,
+    xOf: (Entry) -> Float? = { it.hourOfDay }, fixedLo: Int? = null, fixedHi: Int? = null,
+    labelStep: Int = 3, label: (Int) -> String = { "$it" },
+) {
     val measurer = rememberTextMeasurer()
     val cs = MaterialTheme.colorScheme
     val grid = cs.outlineVariant
@@ -543,9 +551,9 @@ fun HourOfDayChart(data: List<Entry>, modifier: Modifier) {
     Canvas(modifier) {
         val l = 28.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
         val w = size.width - l - r; val h = size.height - t - b
-        val hours = data.map { it.dateTime.hour }
-        val lo = (minOf(6, hours.minOrNull() ?: 6) / 3) * 3
-        val hi = minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
+        val hours = data.mapNotNull { xOf(it)?.toInt() }
+        val lo = fixedLo ?: ((minOf(6, hours.minOrNull() ?: 6) / 3) * 3)
+        val hi = fixedHi ?: minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
         val span = (hi - lo).toFloat()
         fun x(hr: Float) = l + w * (hr - lo) / span
         fun y(a: Float) = t + h * (1 - a / 10f)   // baseline = 0, top = 10
@@ -557,20 +565,21 @@ fun HourOfDayChart(data: List<Entry>, modifier: Modifier) {
         }
         var hr = lo
         while (hr < hi) {
-            val m = measurer.measure("$hr", style)
+            val m = measurer.measure(label(hr), style)
             drawText(m, topLeft = Offset(x(hr + 0.5f) - m.size.width / 2f, t + h + 6.dp.toPx()))
-            hr += 3
+            hr += labelStep
         }
         val slot = w / span
         val barW = maxOf(3.dp.toPx(), slot * 0.45f)
         for (hh in lo until hi) {
-            val xs = data.filter { it.dateTime.hour == hh }.map { it.anxiety!! }
+            val xs = data.filter { xOf(it)?.toInt() == hh }.map { it.anxiety!! }
             if (xs.isEmpty()) continue
             val top = y(xs.average().toFloat())
             drawRect(bar, Offset(x(hh + 0.5f) - barW / 2f, top), Size(barW, y(0f) - top))
         }
         data.forEach { e ->
-            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.hourOfDay), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+            val ex = xOf(e) ?: return@forEach
+            drawCircle(dot, 2.5.dp.toPx(), Offset(x(ex), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
@@ -620,7 +629,7 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
             d += step
         }
         data.forEach { e ->
-            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.ts), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.dateTime.atZone(zone).toInstant().toEpochMilli()), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         val pts = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()),

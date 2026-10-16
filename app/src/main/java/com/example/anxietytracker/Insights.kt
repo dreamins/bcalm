@@ -9,6 +9,7 @@ data class Insights(
     val count: Int,
     val avg: Double,
     val sentence: String,
+    val wakeSentence: String,
     val causes: List<DiffRow>,
     val otherCauses: Int,
     val factors: List<DiffRow>,
@@ -49,23 +50,17 @@ fun computeInsights(all: List<Entry>): Insights {
     val sentence = if (n < 10) {
         "Log a few more times to see patterns."
     } else {
-        var bestStart = -1
-        var bestAvg = 0.0
-        var bestN = 0
-        for (s in 0..21) {
-            val w = data.filter { it.dateTime.hour >= s && it.dateTime.hour < s + 3 }.map { it.anxiety!! }
-            if (w.size < 3) continue
-            val m = w.average()
-            val better = bestStart < 0 || m > bestAvg + 1e-9 ||
-                (abs(m - bestAvg) <= 1e-9 && w.size > bestN)
-            if (better) { bestStart = s; bestAvg = m; bestN = w.size }
-        }
-        if (bestStart < 0 || bestAvg - avg < 0.3) {
-            "No time of day stands out yet."
-        } else {
-            "Your hardest time is usually ${windowLabel(bestStart)} " +
-                "(avg ${"%.1f".format(bestAvg)}, vs ${"%.1f".format(avg)} overall)."
-        }
+        hardestWindow(data, avg, 3, 0..21, { it.dateTime.hour }) { windowLabel(it) }
+            ?.let { "Your hardest time is usually $it" } ?: "No time of day stands out yet."
+    }
+
+    val wakeData = data.filter { it.hoursSinceWake != null }
+    val wakeSentence = if (wakeData.size < 10) {
+        "Log a few more times with your wake time set to see how it relates to waking."
+    } else {
+        hardestWindow(wakeData, wakeData.map { it.anxiety!! }.average(), 2, 0..18, { it.hoursSinceWake!!.toInt() }) {
+            "$it–${it + 2} h after you wake up"
+        }?.let { "Relative to waking, it's usually hardest $it" } ?: "No time since waking stands out yet."
     }
 
     val byCause = data.flatMap { e -> e.causes.distinct().map { it to e.anxiety!! } }
@@ -102,7 +97,7 @@ fun computeInsights(all: List<Entry>): Insights {
         cmp("Partner tense vs good", vals { it.partner == 2 }, vals { it.partner == 0 }),
         cmp("Poor sleep (≤2 vs ≥4)", vals { (it.sleep ?: 99) <= 2 }, vals { (it.sleep ?: 0) >= 4 }),
     )
-    return Insights(n, avg, sentence, causes, other, factors)
+    return Insights(n, avg, sentence, wakeSentence, causes, other, factors)
 }
 
 /** One line of the night-sweats section: label on the left, plain-text value on the right. */
@@ -168,4 +163,23 @@ fun computeSweatInsights(all: List<Entry>, fromMs: Long = 0L): SweatInsights? {
             byDose.entries.joinToString(" · ") { "${it.key.second} ${rate(it.value)}" })
 
     return SweatInsights(nights.size, nights.count { it.sweat }, lines)
+}
+
+/** Best [width]-wide window (start in [starts], by [key]) with >= 3 entries and mean >= 0.3 above [avg]; "<label> (avg x, vs y overall)." or null. */
+private fun hardestWindow(
+    data: List<Entry>, avg: Double, width: Int, starts: IntRange, key: (Entry) -> Int, label: (Int) -> String,
+): String? {
+    var bestStart = -1
+    var bestAvg = 0.0
+    var bestN = 0
+    for (s in starts) {
+        val w = data.filter { key(it) >= s && key(it) < s + width }.map { it.anxiety!! }
+        if (w.size < 3) continue
+        val m = w.average()
+        val better = bestStart < 0 || m > bestAvg + 1e-9 ||
+            (abs(m - bestAvg) <= 1e-9 && w.size > bestN)
+        if (better) { bestStart = s; bestAvg = m; bestN = w.size }
+    }
+    if (bestStart < 0 || bestAvg - avg < 0.3) return null
+    return "${label(bestStart)} (avg ${"%.1f".format(bestAvg)}, vs ${"%.1f".format(avg)} overall)."
 }

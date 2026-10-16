@@ -19,7 +19,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
-- **Insights chart.** Hourly average bars with single entries as dots, a plain-language note on your hardest time of day, and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
+- **Insights chart.** Hourly average bars with single entries as dots, a "Since waking" view (hours after your wake time) with a matching note, a plain-language note on your hardest time of day (entries keep the local time where they were logged, even after travelling), and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
 - **Check for updates** in Settings compares your installed version with the latest release and links to the download. It only runs when you tap it.
 - **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once.
@@ -34,9 +34,9 @@ The screenshots use generated demo data.
 
 ## CSV columns
 
-`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis`
+`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis, utc_offset`
 
-`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`.
+`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files); `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
 
 ## Privacy
 

@@ -76,9 +76,9 @@ object Store {
         get() = prefs.getInt("intervalHours", 3)
         set(v) { prefs.edit().putInt("intervalHours", v).apply() }
 
-    var chartView: Int  // 0 = by hour of day, 1 = over time
-        get() = prefs.getInt("chartView", 0)
-        set(v) { prefs.edit().putInt("chartView", v).apply() }
+    var chartView: Int  // 0 = time of day, 1 = since waking, 2 = over time
+        get() = prefs.getInt("chartView3", 0)
+        set(v) { prefs.edit().putInt("chartView3", v).apply() }
 
     // ---- Drive/CSV sync target (a SAF document uri) and last result ----
     private val _syncUri = MutableStateFlow<String?>(null)
@@ -171,11 +171,11 @@ object Store {
     fun removeCause(name: String) = saveCauses(_causeList.value - name)
 
     // ---- entries ----
-    fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis()): Entry {
+    fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis(), offsetMin: Int? = localOffsetMin(ts)): Entry {
         val n = d.normalized()
         return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes,
             _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } },
-            _medDose.value?.let { medName.ifBlank { null } }, n.nightSweats, n.alcohol, n.cannabis)
+            _medDose.value?.let { medName.ifBlank { null } }, n.nightSweats, n.alcohol, n.cannabis, offsetMin)
     }
 
     @Synchronized
@@ -245,7 +245,7 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis)).joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin)).joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -267,7 +267,8 @@ object Store {
                 p.getOrNull(12)?.takeIf { it.isNotBlank() },
                 p.getOrNull(13)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(14)?.let { i(it) }?.let { it == 1 },
-                p.getOrNull(15)?.let { i(it) }?.let { it == 1 })
+                p.getOrNull(15)?.let { i(it) }?.let { it == 1 },
+                p.getOrNull(16)?.let { i(it) })
         }.sortedBy { it.ts }
     }
 }
