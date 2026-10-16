@@ -268,7 +268,7 @@ object Store {
                 p.getOrNull(13)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(14)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(15)?.let { i(it) }?.let { it == 1 },
-                p.getOrNull(16)?.let { i(it) })
+                p.getOrNull(16)?.let { i(it) } ?: localOffsetMin(ts))
         }.sortedBy { it.ts }
     }
 }

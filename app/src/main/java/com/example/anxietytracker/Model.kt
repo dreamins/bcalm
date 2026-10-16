@@ -191,7 +191,7 @@ object Csv {
                 min("wake_time"), col("sleep_quality")?.toIntOrNull(),
                 col("causes")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
                 dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
-                bool("night_sweats"), bool("alcohol"), bool("cannabis"), off,
+                bool("night_sweats"), bool("alcohol"), bool("cannabis"), off ?: localOffsetMin(ts),
             )
         }
         return out
