@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_paper">#FAF9F6</color>
+    <color name="widget_paper">#F7F6F2</color>
+    <color name="widget_card">#FFFFFF</color>
     <color name="widget_ink">#1C1C1E</color>
-    <color name="widget_grey">#6E6E73</color>
-    <color name="widget_hairline">#E5E5EA</color>
+    <color name="widget_grey">#6B6B70</color>
+    <color name="widget_hairline">#E6E3DC</color>
 </resources>

@@ -31,22 +31,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -68,7 +77,9 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-private val SmallShape = RoundedCornerShape(6.dp)
+private val SmallShape = RoundedCornerShape(10.dp)
+private val CardShape = RoundedCornerShape(16.dp)
+private val CellShape = RoundedCornerShape(10.dp)
 
 // ---------------- App shell ----------------
 
@@ -76,22 +87,26 @@ private val SmallShape = RoundedCornerShape(6.dp)
 fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0) {
     var tab by remember { mutableIntStateOf(initialTab.coerceIn(0, 3)) }
     val snack = remember { SnackbarHostState() }
-    val cs = MaterialTheme.colorScheme
+    val t = MaterialTheme.bcalm
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
             Column {
-                HorizontalDivider(color = cs.outlineVariant)
-                NavigationBar(containerColor = cs.background, tonalElevation = 0.dp) {
-                    listOf("Log", "Chart", "History", "Settings").forEachIndexed { i, t ->
+                HorizontalDivider(color = t.cardBorder)
+                NavigationBar(containerColor = t.card, tonalElevation = 0.dp) {
+                    listOf("Log", "Chart", "History", "Settings").forEachIndexed { i, label ->
                         NavigationBarItem(
                             selected = tab == i, onClick = { tab = i },
-                            icon = { TabIcon(i) }, label = { Text(t) },
+                            icon = { TabIcon(i) },
+                            label = {
+                                Text(label, fontSize = 12.sp,
+                                    fontWeight = if (tab == i) FontWeight.SemiBold else FontWeight.Medium)
+                            },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = cs.primary, selectedTextColor = cs.primary,
-                                indicatorColor = Color.Transparent,
-                                unselectedIconColor = cs.onSurfaceVariant,
-                                unselectedTextColor = cs.onSurfaceVariant))
+                                selectedIconColor = t.accent, selectedTextColor = t.accent,
+                                indicatorColor = t.accentTint,
+                                unselectedIconColor = t.secondary,
+                                unselectedTextColor = t.secondary))
                     }
                 }
             }
@@ -139,40 +154,97 @@ private fun ScreenTitle(t: String) =
 /** Small grey caption used as a section header. */
 @Composable
 private fun SectionHeader(t: String, modifier: Modifier = Modifier) =
-    Text(t.uppercase(), modifier, style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.8.sp),
+    Text(t.uppercase(), modifier,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp),
         color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable
 private fun Caption(t: String, modifier: Modifier = Modifier) =
     Text(t, modifier, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+/** A white rounded card with a hairline border; the unit every screen section is built from. */
+@Composable
+private fun SectionCard(
+    modifier: Modifier = Modifier,
+    padding: PaddingValues = PaddingValues(16.dp),
+    spacing: Dp = 10.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val t = MaterialTheme.bcalm
+    Column(
+        modifier.fillMaxWidth().clip(CardShape).background(t.card)
+            .border(1.dp, t.cardBorder, CardShape).padding(padding),
+        verticalArrangement = Arrangement.spacedBy(spacing), content = content)
+}
+
+/** Card title on the left, optional small secondary note on the right. */
+@Composable
+private fun CardHeader(title: String, trailing: String? = null) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(title, Modifier.alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            Text(trailing, Modifier.alignByBaseline().padding(start = 12.dp), fontSize = 12.sp,
+                color = MaterialTheme.bcalm.secondary, textAlign = TextAlign.End)
+        }
+    }
+}
+
 /**
  * The one control for choosing among a few options: a hairline-outlined segmented row.
- * Selected = solid accent with white text. Tapping the selected option clears it when [allowClear].
+ * Selected = solid accent with on-accent text. Tapping the selected option clears it when [allowClear].
  */
 @Composable
 fun Segmented(
     options: List<String>, selected: Int?, modifier: Modifier = Modifier,
-    height: Dp = 44.dp, allowClear: Boolean = true,
-    textSize: Int = 15, onPick: (Int?) -> Unit,
+    height: Dp = 36.dp, allowClear: Boolean = true,
+    textSize: Int = 14, onPick: (Int?) -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
-    Row(modifier.height(height).clip(SmallShape).border(1.dp, cs.outline, SmallShape).selectableGroup()) {
+    val t = MaterialTheme.bcalm
+    Row(modifier.height(height).clip(SmallShape).border(1.dp, t.cardBorder, SmallShape).selectableGroup()) {
         options.forEachIndexed { i, label ->
             val sel = selected == i
             if (i > 0) {
                 val joined = sel || selected == i - 1
-                Box(Modifier.fillMaxHeight().width(1.dp).background(if (joined) cs.primary else cs.outline))
+                Box(Modifier.fillMaxHeight().width(1.dp).background(if (joined) t.accent else t.cardBorder))
             }
             Box(
                 Modifier.weight(1f).fillMaxHeight()
-                    .background(if (sel) cs.primary else Color.Transparent)
+                    .background(if (sel) t.accent else Color.Transparent)
                     .selectable(selected = sel, role = Role.RadioButton,
                         onClick = { onPick(if (sel && allowClear) null else i) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, maxLines = 1, fontSize = textSize.sp,
-                    color = if (sel) cs.onPrimary else cs.onSurface)
+                    fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
+                    color = if (sel) t.onAccent else t.ink)
+            }
+        }
+    }
+}
+
+/** A row of separate bordered number cells (1..[count]); selected = accent fill. */
+@Composable
+private fun ScaleRow(
+    count: Int, selected: Int?, height: Dp, gap: Dp,
+    allowClear: Boolean = false, onPick: (Int?) -> Unit,
+) {
+    val t = MaterialTheme.bcalm
+    Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        for (i in 0 until count) {
+            val sel = selected == i
+            Box(
+                Modifier.weight(1f).height(height).clip(CellShape)
+                    .background(if (sel) t.accent else t.card)
+                    .border(1.dp, if (sel) t.accent else t.cardBorder, CellShape)
+                    .selectable(selected = sel, role = Role.RadioButton,
+                        onClick = { onPick(if (sel && allowClear) null else i) }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("${i + 1}", maxLines = 1, fontSize = if (i >= 9) 14.sp else 15.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (sel) t.onAccent else t.ink)
             }
         }
     }
@@ -182,29 +254,71 @@ fun Segmented(
 @Composable
 private fun LabeledRow(label: String, control: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(label, Modifier.weight(1f), fontSize = 15.sp)
         control()
     }
 }
 
-/** A text row with a check on the right when selected; hairline underneath. */
+/** [LabeledRow] with a small outline icon on the left and an optional hairline underneath. */
 @Composable
-private fun CheckRow(label: String, selected: Boolean, modifier: Modifier = Modifier,
-                     onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp)
-            .combinedClickable(role = Role.Checkbox, onLongClick = onLongClick, onClick = onClick)
-            .padding(horizontal = 2.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) cs.primary else cs.onSurface)
-            if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
-                modifier = Modifier.size(18.dp), tint = cs.primary)
+private fun ContextRow(icon: ImageVector, label: String, divider: Boolean, control: @Composable RowScope.() -> Unit) {
+    val t = MaterialTheme.bcalm
+    Column {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = t.secondary)
+            Spacer(Modifier.width(12.dp))
+            Text(label, Modifier.weight(1f), fontSize = 15.sp)
+            control()
         }
-        HorizontalDivider(color = cs.outlineVariant)
+        if (divider) HorizontalDivider(color = t.innerDivider)
+    }
+}
+
+// Simple 20dp outline icons, 1.5 stroke (core icon set has none of these).
+private fun outlineIcon(name: String, build: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit): ImageVector =
+    ImageVector.Builder(name, 20.dp, 20.dp, 20f, 20f).path(
+        fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.5f,
+        strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, pathBuilder = build).build()
+
+private val CupIcon: ImageVector by lazy {
+    outlineIcon("Cup") {
+        moveTo(4f, 7f); lineTo(14f, 7f); lineTo(14f, 12f)
+        arcTo(4f, 4f, 0f, false, true, 10f, 16f)
+        lineTo(8f, 16f)
+        arcTo(4f, 4f, 0f, false, true, 4f, 12f)
+        close()
+        moveTo(14f, 8.5f); lineTo(15.5f, 8.5f)
+        arcTo(2f, 2f, 0f, false, true, 15.5f, 12.5f)
+        lineTo(14f, 12.5f)
+    }
+}
+
+private val ForkIcon: ImageVector by lazy {
+    outlineIcon("Fork") {
+        moveTo(6f, 3f); lineTo(6f, 8f)
+        arcTo(2f, 2f, 0f, false, false, 10f, 8f)
+        lineTo(10f, 3f)
+        moveTo(8f, 8f); lineTo(8f, 17f)
+        moveTo(14f, 3f)
+        curveTo(12.5f, 4f, 12f, 6f, 12f, 8f)
+        curveTo(12f, 10f, 13f, 11f, 14f, 11f)
+        lineTo(14f, 17f)
+    }
+}
+
+private val PeopleIcon: ImageVector by lazy {
+    outlineIcon("People") {
+        moveTo(5f, 7f)
+        arcTo(2.5f, 2.5f, 0f, true, true, 10f, 7f)
+        arcTo(2.5f, 2.5f, 0f, true, true, 5f, 7f)
+        moveTo(11f, 7.5f)
+        arcTo(2f, 2f, 0f, true, true, 15f, 7.5f)
+        arcTo(2f, 2f, 0f, true, true, 11f, 7.5f)
+        moveTo(3f, 16f)
+        curveTo(3.5f, 13.5f, 5.3f, 12f, 7.5f, 12f)
+        curveTo(9.7f, 12f, 11.5f, 13.5f, 12f, 16f)
+        moveTo(12.5f, 12.2f)
+        curveTo(14.4f, 12.3f, 15.9f, 13.6f, 16.4f, 16f)
     }
 }
 
@@ -227,9 +341,14 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
     val timeFmt = remember { java.time.format.DateTimeFormatter.ofPattern("HH:mm") }
+    val dateFmt = remember { DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault()) }
+    val dateLine = java.time.Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
+    val t = MaterialTheme.bcalm
 
     val active = activeEntry
     val last = entries.lastOrNull()
+    val lastAnxiety = entries.lastOrNull { it.anxiety != null }
+        ?.let { "Last: ${it.anxiety} at ${it.dateTime.format(timeFmt)}" }
     val showResult: (LogResult) -> Unit = { r ->
         scope.launch {
             snack.currentSnackbarData?.dismiss()
@@ -261,16 +380,17 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val anyDailyUnset = d.wakeMin == null || d.sleep == null || d.exercise == null
     val todayExpanded = todayOpen ?: anyDailyUnset
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Spacer(Modifier.height(8.dp))
-        Text("How anxious are you right now?", style = MaterialTheme.typography.titleMedium)
-        Column {
-            Segmented(
-                options = (1..10).map { it.toString() },
-                selected = active?.anxiety?.minus(1),
-                height = 52.dp, allowClear = false, textSize = 17,
-            ) { i ->
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(start = 4.dp, end = 4.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(dateLine, fontSize = 13.sp, color = t.secondary)
+            Text("How are you right now?", style = MaterialTheme.typography.titleLarge)
+        }
+
+        SectionCard {
+            CardHeader("Anxiety", lastAnxiety)
+            ScaleRow(10, active?.anxiety?.minus(1), height = 46.dp, gap = 4.dp, allowClear = false) { i ->
                 if (i != null) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     val r = vm.tapAnxiety(i + 1)
@@ -282,59 +402,56 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Caption("Calm"); Caption("Overwhelmed")
             }
-        }
-        Caption(status)
-
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Joy", style = MaterialTheme.typography.titleSmall)
-                Caption("optional — after something good")
+            if (active != null) {
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
+                    .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Text(status, fontSize = 12.sp, color = t.accent)
+                }
+            } else {
+                Caption(status)
             }
-            Spacer(Modifier.height(6.dp))
-            Segmented(
-                options = (1..5).map { it.toString() },
-                selected = active?.joy?.minus(1),
-                allowClear = false,
-            ) { i ->
+        }
+
+        SectionCard {
+            CardHeader("Joy", "optional — after something good")
+            ScaleRow(5, active?.joy?.minus(1), height = 42.dp, gap = 6.dp, allowClear = false) { i ->
                 if (i != null) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     vm.tapJoy(i + 1)?.let(showResult)
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Caption("Barely"); Caption("Really landed")
             }
         }
 
-        Spacer(Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("What's going on?", style = MaterialTheme.typography.titleSmall)
-            Caption("optional")
+        SectionCard(padding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)) {
+            CardHeader("What's going on?", "optional")
+            CausesList(causes, sel, entries, active, vm)
         }
-        CausesList(causes, sel, entries, active, vm)
 
-        Spacer(Modifier.height(2.dp))
-        LabeledRow("Caffeine") {
-            Segmented(YES_NO, boolToIdx(d.caffeine), Modifier.width(140.dp)) { vm.setCaffeine(idxToBool(it)) }
-        }
-        LabeledRow("Food in the last 3h") {
-            Segmented(YES_NO, boolToIdx(d.food), Modifier.width(140.dp)) { vm.setFood(idxToBool(it)) }
-        }
-        LabeledRow("Partner") {
-            Segmented(PARTNER_DISPLAY, d.partner, Modifier.width(240.dp)) { vm.setPartner(it) }
+        SectionCard(padding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), spacing = 0.dp) {
+            ContextRow(CupIcon, "Caffeine", divider = true) {
+                Segmented(YES_NO, boolToIdx(d.caffeine), Modifier.width(112.dp)) { vm.setCaffeine(idxToBool(it)) }
+            }
+            ContextRow(ForkIcon, "Food in the last 3h", divider = true) {
+                Segmented(YES_NO, boolToIdx(d.food), Modifier.width(112.dp)) { vm.setFood(idxToBool(it)) }
+            }
+            ContextRow(PeopleIcon, "Partner", divider = false) {
+                Segmented(PARTNER_DISPLAY, d.partner, Modifier.width(176.dp), textSize = 13) { vm.setPartner(it) }
+            }
         }
 
         TodayCard(d, entries, todayExpanded, onToggle = { vm.setTodayOpen(!todayExpanded) }, vm = vm)
-        Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
 private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggle: () -> Unit, vm: MainViewModel) {
-    val cs = MaterialTheme.colorScheme
+    val t = MaterialTheme.bcalm
     var showTime by remember { mutableStateOf(false) }
     var otherDose by remember { mutableStateOf(false) }
     val dose by vm.medDose.collectAsStateWithLifecycle()
@@ -352,42 +469,41 @@ private fun TodayCard(d: Draft, entries: List<Entry>, expanded: Boolean, onToggl
         if (d.alcohol == true) "Alcohol" else null,
         if (d.cannabis == true) "Cannabis" else null,
     ).joinToString(" · ")
-    Column(Modifier.fillMaxWidth().border(1.dp, cs.outlineVariant, SmallShape)) {
+    SectionCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(onClick = onToggle)
-            .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+            .padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 SectionHeader("Today")
-                Text(summary, style = MaterialTheme.typography.bodyMedium)
+                Text(summary, fontSize = 15.sp)
             }
             Icon(if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                 contentDescription = if (expanded) "Collapse" else "Expand",
-                tint = cs.onSurfaceVariant)
+                tint = t.secondary)
         }
         if (expanded) {
-            HorizontalDivider(color = cs.outlineVariant)
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            HorizontalDivider(color = t.innerDivider)
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 LabeledRow("Woke at") {
                     TextButton(onClick = { showTime = true }) { Text(d.wakeMin?.let { fmtMin(it) } ?: "Set") }
                     TextButton(onClick = {
-                        val t = java.time.LocalTime.now(); vm.setWake(t.hour * 60 + t.minute)
+                        val now = java.time.LocalTime.now(); vm.setWake(now.hour * 60 + now.minute)
                     }) { Text("Now") }
                     if (d.wakeMin != null) TextButton(onClick = { vm.setWake(null) }) { Text("Clear") }
                 }
-                Text("Sleep quality", style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
-                Segmented((1..5).map { it.toString() }, d.sleep?.minus(1)) { vm.setSleep(it?.plus(1)) }
+                Text("Sleep quality", fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                ScaleRow(5, d.sleep?.minus(1), height = 42.dp, gap = 6.dp, allowClear = true) { vm.setSleep(it?.plus(1)) }
                 Spacer(Modifier.height(4.dp))
                 LabeledRow("Exercise") {
-                    Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(140.dp)) { vm.setExercise(idxToBool(it)) }
+                    Segmented(YES_NO, boolToIdx(d.exercise), Modifier.width(112.dp)) { vm.setExercise(idxToBool(it)) }
                 }
                 LabeledRow("Night sweats") {
-                    Segmented(YES_NO, boolToIdx(d.nightSweats), Modifier.width(140.dp)) { vm.setNightSweats(idxToBool(it)) }
+                    Segmented(YES_NO, boolToIdx(d.nightSweats), Modifier.width(112.dp)) { vm.setNightSweats(idxToBool(it)) }
                 }
                 LabeledRow("Alcohol") {
-                    Segmented(YES_NO, boolToIdx(d.alcohol), Modifier.width(140.dp)) { vm.setAlcohol(idxToBool(it)) }
+                    Segmented(YES_NO, boolToIdx(d.alcohol), Modifier.width(112.dp)) { vm.setAlcohol(idxToBool(it)) }
                 }
                 LabeledRow("Cannabis") {
-                    Segmented(YES_NO, boolToIdx(d.cannabis), Modifier.width(140.dp)) { vm.setCannabis(idxToBool(it)) }
+                    Segmented(YES_NO, boolToIdx(d.cannabis), Modifier.width(112.dp)) { vm.setCannabis(idxToBool(it)) }
                 }
                 LabeledRow(if (unit.isBlank()) "Med dose" else "Med dose ($unit)") {
                     if (doseOptions.isNotEmpty()) {
@@ -420,6 +536,27 @@ private fun DoseDialog(initial: Double?, unit: String, onDismiss: () -> Unit, on
 
 private const val TOP_CAUSES = 6
 
+/** One cause in the two-column grid: bordered 44dp row; selected = accent border, tint fill, check. */
+@Composable
+private fun CauseCell(label: String, selected: Boolean, modifier: Modifier,
+                      onLongClick: () -> Unit, onClick: () -> Unit) {
+    val t = MaterialTheme.bcalm
+    Row(
+        modifier.height(44.dp).clip(CellShape)
+            .background(if (selected) t.accentTint else t.card)
+            .border(1.dp, if (selected) t.accent else t.cardBorder, CellShape)
+            .combinedClickable(role = Role.Checkbox, onLongClick = onLongClick, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) t.accent else t.ink)
+        if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
+            modifier = Modifier.size(16.dp), tint = t.accent)
+    }
+}
+
 @Composable
 fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, active: Entry?, vm: MainViewModel) {
     var adding by remember { mutableStateOf(false) }
@@ -445,23 +582,27 @@ fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, act
     val top = ranked.take(TOP_CAUSES).map { it.name }
     val shown = top + ranked.map { it.name }.filter { it in sel && it !in top }
     val hidden = ranked.size - shown.size
-    Column {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         shown.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { c ->
-                    CheckRow(c, c in sel, Modifier.weight(1f), onLongClick = { removing = c }) { vm.toggleCause(c) }
+                    CauseCell(c, c in sel, Modifier.weight(1f), onLongClick = { removing = c }) { vm.toggleCause(c) }
                 }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        Row {
-            if (hidden > 0) TextButton(onClick = { showAll = true }) { Text("More causes… ($hidden)") }
-            TextButton(onClick = { adding = true }) { Text("Add cause…") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            if (hidden > 0) TextButton(onClick = { showAll = true }) {
+                Text("More causes… ($hidden)", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            } else Spacer(Modifier)
+            TextButton(onClick = { adding = true }) {
+                Text("Add cause…", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
     if (showAll) {
-        val cs = MaterialTheme.colorScheme
+        val t = MaterialTheme.bcalm
         ModalBottomSheet(onDismissRequest = { showAll = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -474,15 +615,15 @@ fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, act
                         Text(rc.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) cs.primary else cs.onSurface)
+                            color = if (selected) t.accent else t.ink)
                         if (rc.uses > 0) Text("${rc.uses}×", style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+                            color = t.secondary, modifier = Modifier.padding(start = 8.dp))
                         Box(Modifier.width(26.dp), contentAlignment = Alignment.CenterEnd) {
                             if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
-                                modifier = Modifier.size(18.dp), tint = cs.primary)
+                                modifier = Modifier.size(18.dp), tint = t.accent)
                         }
                     }
-                    HorizontalDivider(color = cs.outlineVariant)
+                    HorizontalDivider(color = t.innerDivider)
                 }
                 item {
                     TextButton(onClick = { adding = true }) { Text("Add cause…") }
@@ -519,6 +660,41 @@ fun TimeDialog(initial: Int?, onDismiss: () -> Unit, onOk: (Int) -> Unit) {
 
 // ---------------- Chart ----------------
 
+/** Small segmented track for the 7d / 30d / All range; the selected thumb is a card with 1dp elevation. */
+@Composable
+private fun RangeTrack(labels: List<String>, selected: Int, onPick: (Int) -> Unit) {
+    val t = MaterialTheme.bcalm
+    val outer = RoundedCornerShape(10.dp)
+    val inner = RoundedCornerShape(8.dp)
+    Row(Modifier.clip(outer).background(t.segmentedTrack).padding(3.dp).selectableGroup()) {
+        labels.forEachIndexed { i, l ->
+            val sel = i == selected
+            Box(
+                Modifier.height(30.dp)
+                    .then(if (sel) Modifier.shadow(1.dp, inner) else Modifier)
+                    .clip(inner)
+                    .background(if (sel) t.card else Color.Transparent)
+                    .selectable(selected = sel, role = Role.RadioButton, onClick = { onPick(i) })
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(l, fontSize = 13.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (sel) t.ink else t.secondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: String, modifier: Modifier) {
+    val t = MaterialTheme.bcalm
+    Column(modifier.clip(CellShape).background(t.background).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, fontSize = 12.sp, color = t.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
 @Composable
 fun ChartScreen(vm: MainViewModel) {
     val all by vm.entries.collectAsStateWithLifecycle()
@@ -533,46 +709,69 @@ fun ChartScreen(vm: MainViewModel) {
             LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         computeInsights(all.filter { it.ts >= cutoff })
     }
-    val cs = MaterialTheme.colorScheme
+    val t = MaterialTheme.bcalm
     val ranges = listOf(7, 30, 0)
     var view by remember { mutableIntStateOf(Store.chartView) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScreenTitle("Chart")
-        Segmented(listOf("7 days", "30 days", "All"), ranges.indexOf(range), allowClear = false) {
-            if (it != null) range = ranges[it]
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            ScreenTitle("Chart")
+            RangeTrack(listOf("7d", "30d", "All"), ranges.indexOf(range)) { range = ranges[it] }
         }
-        Segmented(listOf("Time of day", "Since waking", "Over time"), view, allowClear = false) {
+        Segmented(listOf("Time of day", "Since waking", "Over time"), view, Modifier.fillMaxWidth(),
+            allowClear = false) {
             if (it != null) { view = it; Store.chartView = it }
         }
-        Text(if (view == 1) ins.wakeSentence else ins.sentence, style = MaterialTheme.typography.bodyLarge)
-        if (ins.count > 0) Caption("${ins.count} entries · average ${"%.1f".format(ins.avg)}")
-        SectionHeader(when (view) { 0 -> "Anxiety by hour of day"; 1 -> "Anxiety since waking"; else -> "Anxiety over time" })
-        if (view == 0) {
-            HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp))
-            Caption("Hour of day, in local time where logged. Bars are the hourly average; dots are single entries.")
-        } else if (view == 1) {
-            val wakeData = remember(data) { data.filter { it.hoursSinceWake != null } }
-            HourOfDayChart(wakeData, Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4) { "${it}h" }
-            Caption("Hours since waking. Needs a wake time on the entry. Bars are the hourly average; dots are single entries.")
-        } else {
-            TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
-            Caption("Date. Line is the daily average; dots are single entries.")
+
+        SectionCard(padding = PaddingValues(horizontal = 16.dp, vertical = 18.dp), spacing = 14.dp) {
+            val sentenceText = if (view == 1) ins.wakeSentence else ins.sentence
+            val hard = if (view == 1) ins.wakeHard else ins.hard
+            val cut = if (hard != null) sentenceText.indexOf(hard.label) else -1
+            val sentence = if (hard != null && cut >= 0) buildAnnotatedString {
+                append(sentenceText.substring(0, cut))
+                withStyle(SpanStyle(color = t.accent)) { append(hard.label) }
+                append(".")
+            } else AnnotatedString(sentenceText)
+            Text(sentence, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+            if (ins.count > 0) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatTile("Average", "%.1f".format(ins.avg), Modifier.weight(1f))
+                    if (hard != null) StatTile(hard.label, "%.1f".format(hard.avg), Modifier.weight(1f))
+                    StatTile("Entries", "${ins.count}", Modifier.weight(1f))
+                }
+            }
+            SectionHeader(when (view) { 0 -> "Anxiety by hour of day"; 1 -> "Anxiety since waking"; else -> "Anxiety over time" })
+            if (view == 0) {
+                HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp),
+                    highlight = ins.hard?.let { it.start until it.start + it.width })
+                Caption("Hour of day, in local time where logged. Bars are the hourly average; dots are single entries.")
+            } else if (view == 1) {
+                val wakeData = remember(data) { data.filter { it.hoursSinceWake != null } }
+                HourOfDayChart(wakeData, Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4,
+                    ins.wakeHard?.let { it.start until it.start + it.width }) { "${it}h" }
+                Caption("Hours since waking. Needs a wake time on the entry. Bars are the hourly average; dots are single entries.")
+            } else {
+                TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
+                Caption("Date. Line is the daily average; dots are single entries.")
+            }
         }
 
         if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
-            Spacer(Modifier.height(4.dp))
-            SectionHeader("Patterns")
-            Column {
-                HorizontalDivider(color = cs.outlineVariant)
-                ins.causes.forEach { PatternRow(it.label, "${it.n}×", it.diff) }
-                ins.factors.forEach { PatternRow(it.label, null, it.diff) }
+            SectionCard(spacing = 0.dp) {
+                CardHeader("Patterns")
+                Spacer(Modifier.height(6.dp))
+                val rows: List<Triple<String, String?, Double>> = ins.causes.map { Triple(it.label, "${it.n}×", it.diff) } +
+                    ins.factors.map { Triple(it.label, null as String?, it.diff) }
+                rows.forEachIndexed { i, r -> PatternRow(r.first, r.second, r.third, divider = i < rows.lastIndex) }
+                if (ins.otherCauses > 0) {
+                    Caption(if (ins.otherCauses == 1) "1 other cause with too few entries"
+                            else "${ins.otherCauses} other causes with too few entries",
+                        Modifier.padding(top = 8.dp))
+                }
+                Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).",
+                    Modifier.padding(top = 6.dp))
             }
-            if (ins.otherCauses > 0) {
-                Caption(if (ins.otherCauses == 1) "1 other cause with too few entries"
-                        else "${ins.otherCauses} other causes with too few entries")
-            }
-            Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).")
         }
 
         val joy = remember(all, range) {
@@ -581,30 +780,29 @@ fun ChartScreen(vm: MainViewModel) {
             computeJoyInsights(all.filter { it.ts >= cutoff })
         }
         if (joy != null) {
-            Spacer(Modifier.height(4.dp))
-            SectionHeader("Joy")
-            Column {
-                HorizontalDivider(color = cs.outlineVariant)
-                SweatRowView("Joy logged ${joy.count} times · average ${"%.1f".format(joy.avg)}", null)
-                if (joy.doses.isNotEmpty()) {
-                    Text("By medication dose", Modifier.padding(top = 10.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.titleSmall)
-                    HorizontalDivider(color = cs.outlineVariant)
-                    joy.doses.forEach { r ->
-                        SweatRowView(r.label,
-                            "anxiety avg ${r.anxAvg?.let { "%.1f".format(it) } ?: "–"} (${r.anxN}) · " +
-                                "joy avg ${r.joyAvg?.let { "%.1f".format(it) } ?: "–"} (${r.joyN})")
+            SectionCard(spacing = 0.dp) {
+                CardHeader("Joy")
+                Spacer(Modifier.height(6.dp))
+                SweatRowView("Joy logged ${joy.count} times · average ${"%.1f".format(joy.avg)}", null,
+                    divider = joy.causes.isNotEmpty())
+                if (joy.causes.isNotEmpty()) {
+                    Text("Top joy causes", Modifier.padding(top = 10.dp, bottom = 4.dp), fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold)
+                    HorizontalDivider(color = t.innerDivider)
+                    joy.causes.forEachIndexed { i, c ->
+                        SweatRowView(c.label, "${c.n}× · avg ${"%.1f".format(c.avg)}", divider = i < joy.causes.lastIndex)
                     }
                 }
-                if (joy.causes.isNotEmpty()) {
-                    Text("Top joy causes", Modifier.padding(top = 10.dp, bottom = 4.dp),
-                        style = MaterialTheme.typography.titleSmall)
-                    HorizontalDivider(color = cs.outlineVariant)
-                    joy.causes.forEach { SweatRowView(it.label, "${it.n}× · avg ${"%.1f".format(it.avg)}") }
+            }
+            if (joy.doses.isNotEmpty()) {
+                SectionCard {
+                    CardHeader("Calm or flat?", "by medication dose")
+                    DoseGrid(joy.doses)
+                    Caption("Calm: anxiety down, joy holds at 3–5. Flat: anxiety down, joy drifts to 1–2. Plain averages, not a diagnosis.")
+                    Caption(joy.doses.joinToString(" / ") { "${it.anxN}" } + " anxiety and " +
+                        joy.doses.joinToString(" / ") { "${it.joyN}" } + " joy entries.")
                 }
             }
-            if (joy.doses.isNotEmpty())
-                Caption("Calm: anxiety down, joy holds at 3–5. Flat: anxiety down, joy drifts to 1–2. Plain averages, not a diagnosis.")
         }
 
         val sweat = remember(all, range) {
@@ -613,67 +811,102 @@ fun ChartScreen(vm: MainViewModel) {
             computeSweatInsights(all, cutoff)
         }
         if (sweat != null) {
-            Spacer(Modifier.height(4.dp))
-            SectionHeader("Night sweats")
-            Column {
-                HorizontalDivider(color = cs.outlineVariant)
-                SweatRowView("Night sweats on ${sweat.sweats} of ${sweat.nights} nights", null)
-                sweat.lines.forEach { SweatRowView(it.label, it.value) }
+            SectionCard(spacing = 0.dp) {
+                CardHeader("Night sweats")
+                Spacer(Modifier.height(6.dp))
+                SweatRowView("Night sweats on ${sweat.sweats} of ${sweat.nights} nights", null,
+                    divider = sweat.lines.isNotEmpty())
+                sweat.lines.forEachIndexed { i, l -> SweatRowView(l.label, l.value, divider = i < sweat.lines.lastIndex) }
+                Caption("Compared with the evening before. Counts per calendar day, using the latest answer that day. Comparisons need at least 2 nights on each side. These are plain counts, not an explanation.",
+                    Modifier.padding(top = 8.dp))
             }
-            Caption("Compared with the evening before. Counts per calendar day, using the latest answer that day. Comparisons need at least 2 nights on each side. These are plain counts, not an explanation.")
+        }
+    }
+}
+
+/** Dose label | thin anxiety bar (avg/10) + value | thin joy bar (avg/5) + value. */
+@Composable
+private fun DoseGrid(doses: List<DoseRow>) {
+    val t = MaterialTheme.bcalm
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.width(64.dp))
+            Text("Anxiety", Modifier.weight(1f), fontSize = 12.sp, color = t.secondary)
+            Text("Joy", Modifier.weight(1f), fontSize = 12.sp, color = t.secondary)
+        }
+        doses.forEach { r ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(r.label, Modifier.width(64.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                DoseBar(r.anxAvg, 10f, t.accent, Modifier.weight(1f))
+                DoseBar(r.joyAvg, 5f, t.joy, Modifier.weight(1f))
+            }
         }
     }
 }
 
 @Composable
-private fun SweatRowView(label: String, value: String?) {
-    val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(if (value == null) 1f else 0.4f), style = MaterialTheme.typography.bodyLarge)
-        if (value != null) Text(value, Modifier.weight(0.6f), textAlign = TextAlign.End,
-            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+private fun DoseBar(avg: Double?, max: Float, color: Color, modifier: Modifier) {
+    val t = MaterialTheme.bcalm
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(t.innerDivider)) {
+            if (avg != null) Box(Modifier.fillMaxWidth((avg.toFloat() / max).coerceIn(0f, 1f)).height(6.dp)
+                .clip(RoundedCornerShape(3.dp)).background(color))
+        }
+        Text(avg?.let { "%.1f".format(it) } ?: "–", Modifier.width(30.dp), fontSize = 14.sp)
     }
-    HorizontalDivider(color = cs.outlineVariant)
 }
 
 @Composable
-private fun PatternRow(label: String, count: String?, diff: Double) {
-    val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (count != null) Text(count, Modifier.padding(end = 16.dp),
-            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-        Text(fmtDiff(diff), Modifier.widthIn(min = 44.dp), textAlign = TextAlign.End,
-            style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+private fun SweatRowView(label: String, value: String?, divider: Boolean = true) {
+    val t = MaterialTheme.bcalm
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(if (value == null) 1f else 0.4f), fontSize = 15.sp)
+        if (value != null) Text(value, Modifier.weight(0.6f), textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium, color = t.secondary)
     }
-    HorizontalDivider(color = cs.outlineVariant)
+    if (divider) HorizontalDivider(color = t.innerDivider)
 }
 
-/** Hourly mean bars (thin, accent at low alpha), faint dots for single entries, hairline baseline. */
+@Composable
+private fun PatternRow(label: String, count: String?, diff: Double, divider: Boolean) {
+    val t = MaterialTheme.bcalm
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (count != null) Text(count, Modifier.padding(end = 10.dp), fontSize = 12.sp, color = t.secondary)
+        Text(fmtDiff(diff), Modifier.widthIn(min = 44.dp), textAlign = TextAlign.End,
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+    if (divider) HorizontalDivider(color = t.innerDivider)
+}
+
+/**
+ * Hourly mean bars (muted, rounded top corners; the [highlight] hours in accent), small faint dots for
+ * single entries, hairline baseline.
+ */
 @Composable
 fun HourOfDayChart(
     data: List<Entry>, modifier: Modifier,
     xOf: (Entry) -> Float? = { it.hourOfDay }, fixedLo: Int? = null, fixedHi: Int? = null,
-    labelStep: Int = 3, label: (Int) -> String = { "$it" },
+    labelStep: Int = 3, highlight: IntRange? = null, label: (Int) -> String = { "$it" },
 ) {
     val measurer = rememberTextMeasurer()
-    val cs = MaterialTheme.colorScheme
-    val grid = cs.outlineVariant
-    val baseline = cs.outline
-    val dot = cs.onSurfaceVariant.copy(alpha = 0.5f)
-    val bar = cs.primary.copy(alpha = 0.45f)
-    val txt = cs.onSurfaceVariant
+    val t = MaterialTheme.bcalm
+    val grid = t.innerDivider
+    val baseline = t.cardBorder
+    val dot = t.secondary.copy(alpha = 0.45f)
+    val bar = t.mutedBar
+    val barHi = t.accent
+    val txt = t.secondary
     Canvas(modifier) {
-        val l = 28.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
-        val w = size.width - l - r; val h = size.height - t - b
+        val l = 28.dp.toPx(); val b = 24.dp.toPx(); val top0 = 8.dp.toPx(); val r = 8.dp.toPx()
+        val w = size.width - l - r; val h = size.height - top0 - b
         val hours = data.mapNotNull { xOf(it)?.toInt() }
         val lo = fixedLo ?: ((minOf(6, hours.minOrNull() ?: 6) / 3) * 3)
         val hi = fixedHi ?: minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
         val span = (hi - lo).toFloat()
         fun x(hr: Float) = l + w * (hr - lo) / span
-        fun y(a: Float) = t + h * (1 - a / 10f)   // baseline = 0, top = 10
+        fun y(a: Float) = top0 + h * (1 - a / 10f)   // baseline = 0, top = 10
         val style = TextStyle(color = txt, fontSize = 10.sp)
         for (a in listOf(1, 5, 10)) {
             if (a > 1) drawLine(grid, Offset(l, y(a.toFloat())), Offset(l + w, y(a.toFloat())), 1.dp.toPx())
@@ -683,20 +916,25 @@ fun HourOfDayChart(
         var hr = lo
         while (hr < hi) {
             val m = measurer.measure(label(hr), style)
-            drawText(m, topLeft = Offset(x(hr + 0.5f) - m.size.width / 2f, t + h + 6.dp.toPx()))
+            drawText(m, topLeft = Offset(x(hr + 0.5f) - m.size.width / 2f, top0 + h + 6.dp.toPx()))
             hr += labelStep
         }
         val slot = w / span
-        val barW = maxOf(3.dp.toPx(), slot * 0.45f)
+        val barW = maxOf(3.dp.toPx(), slot * 0.7f)
+        val corner = CornerRadius(4.dp.toPx(), 4.dp.toPx())
         for (hh in lo until hi) {
             val xs = data.filter { xOf(it)?.toInt() == hh }.map { it.anxiety!! }
             if (xs.isEmpty()) continue
             val top = y(xs.average().toFloat())
-            drawRect(bar, Offset(x(hh + 0.5f) - barW / 2f, top), Size(barW, y(0f) - top))
+            val left = x(hh + 0.5f) - barW / 2f
+            val p = Path().apply {
+                addRoundRect(RoundRect(left, top, left + barW, y(0f), corner, corner, CornerRadius.Zero, CornerRadius.Zero))
+            }
+            drawPath(p, if (highlight != null && hh in highlight) barHi else bar)
         }
         data.forEach { e ->
             val ex = xOf(e) ?: return@forEach
-            drawCircle(dot, 2.5.dp.toPx(), Offset(x(ex), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+            drawCircle(dot, 2.dp.toPx(), Offset(x(ex), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
@@ -706,12 +944,12 @@ fun HourOfDayChart(
 @Composable
 fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
-    val cs = MaterialTheme.colorScheme
-    val grid = cs.outlineVariant
-    val baseline = cs.outline
-    val dot = cs.onSurfaceVariant.copy(alpha = 0.5f)
-    val line = cs.primary
-    val txt = cs.onSurfaceVariant
+    val tk = MaterialTheme.bcalm
+    val grid = tk.innerDivider
+    val baseline = tk.cardBorder
+    val dot = tk.secondary.copy(alpha = 0.45f)
+    val line = tk.accent
+    val txt = tk.secondary
     val fmt = remember { DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()) }
     Canvas(modifier) {
         val l = 28.dp.toPx(); val b = 24.dp.toPx(); val t = 8.dp.toPx(); val r = 8.dp.toPx()
@@ -746,7 +984,7 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
             d += step
         }
         data.forEach { e ->
-            drawCircle(dot, 2.5.dp.toPx(), Offset(x(e.dateTime.atZone(zone).toInstant().toEpochMilli()), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+            drawCircle(dot, 2.dp.toPx(), Offset(x(e.dateTime.atZone(zone).toInstant().toEpochMilli()), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         val pts = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()),
@@ -780,6 +1018,7 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val entries by vm.entries.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
+    val t = MaterialTheme.bcalm
     val timeFmt = remember { java.time.format.DateTimeFormatter.ofPattern("HH:mm") }
     val dayFmt = remember { java.time.format.DateTimeFormatter.ofPattern("EEE d MMM") }
     val groups = remember(entries) {
@@ -788,70 +1027,69 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
             .sortedByDescending { it.day }
     }
     val today = LocalDate.now()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
-        item { ScreenTitle("History"); Spacer(Modifier.height(8.dp)) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Column(Modifier.padding(horizontal = 4.dp)) { ScreenTitle("History") } }
         if (entries.isEmpty()) {
-            item { Caption("Nothing here yet. Entries show up once you log.") }
+            item { Caption("Nothing here yet. Entries show up once you log.", Modifier.padding(horizontal = 4.dp)) }
         }
-        groups.forEach { g ->
-            stickyHeader(key = "day-" + g.day.toEpochDay()) {
-                val label = when (g.day) {
-                    today -> "Today"
-                    today.minusDays(1) -> "Yesterday"
-                    else -> g.day.format(dayFmt)
-                }
-                val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
-                val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
-                // Medication is a background setting, so it describes the day rather than any one entry.
-                val med = g.rows.asReversed()
-                    .mapNotNull { e -> e.medLabel?.let { listOfNotNull(e.medName, it).joinToString(" ") } }.distinct()
-                    .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
-                val sweats = g.rows.firstNotNullOfOrNull { it.nightSweats }
-                val alcohol = g.rows.firstNotNullOfOrNull { it.alcohol }
-                val cannabis = g.rows.firstNotNullOfOrNull { it.cannabis }
-                val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med,
-                    if (sweats == true) "Night sweats" else null, if (alcohol == true) "Alcohol" else null,
-                    if (cannabis == true) "Cannabis" else null)
-                    .joinToString(" · ")
-                Column(Modifier.fillMaxWidth().background(cs.background)) {
-                    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.Bottom) {
-                        SectionHeader(label, Modifier.weight(1f))
-                        if (info.isNotEmpty()) Text(info, style = MaterialTheme.typography.labelSmall,
-                            color = cs.onSurfaceVariant)
-                    }
-                    HorizontalDivider(color = cs.outlineVariant)
-                }
+        items(groups, key = { it.day.toEpochDay() }) { g ->
+            val label = when (g.day) {
+                today -> "Today"
+                today.minusDays(1) -> "Yesterday"
+                else -> g.day.format(dayFmt)
             }
-            items(g.rows, key = { it.ts }) { e ->
-                val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
-                    if (v != SwipeToDismissBoxValue.Settled) {
-                        vm.delete(e)
-                        scope.launch {
-                            snack.currentSnackbarData?.dismiss()
-                            if (snack.showSnackbar("Deleted", "Undo", duration = SnackbarDuration.Short) ==
-                                SnackbarResult.ActionPerformed) vm.restore(e)
-                        }
-                        true
-                    } else false
-                })
-                SwipeToDismissBox(state, backgroundContent = {
-                    Box(Modifier.fillMaxSize().background(cs.error).padding(16.dp), Alignment.CenterEnd) {
-                        Text("Delete", color = cs.onError)
-                    }
-                }) {
-                    Column(Modifier.fillMaxWidth().background(cs.background)) {
-                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                            Text(e.anxiety?.toString() ?: "–", Modifier.width(40.dp),
-                                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Column(Modifier.weight(1f)) {
-                                Text(e.dateTime.format(timeFmt), style = MaterialTheme.typography.bodyLarge)
-                                val detail = detailLine(e)
-                                if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
-                                    color = cs.onSurfaceVariant)
+            val wake = g.rows.firstNotNullOfOrNull { it.wakeMin }
+            val sleep = g.rows.firstNotNullOfOrNull { it.sleep }
+            // Medication is a background setting, so it describes the day rather than any one entry.
+            val med = g.rows.asReversed()
+                .mapNotNull { e -> e.medLabel?.let { listOfNotNull(e.medName, it).joinToString(" ") } }.distinct()
+                .takeIf { it.isNotEmpty() }?.joinToString(" → ", prefix = "Med ")
+            val sweats = g.rows.firstNotNullOfOrNull { it.nightSweats }
+            val alcohol = g.rows.firstNotNullOfOrNull { it.alcohol }
+            val cannabis = g.rows.firstNotNullOfOrNull { it.cannabis }
+            val info = listOfNotNull(wake?.let { "Woke ${fmtMin(it)}" }, sleep?.let { "Slept $it/5" }, med,
+                if (sweats == true) "Night sweats" else null, if (alcohol == true) "Alcohol" else null,
+                if (cannabis == true) "Cannabis" else null)
+                .joinToString(" · ")
+            SectionCard(padding = PaddingValues(0.dp), spacing = 0.dp) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.Bottom) {
+                    SectionHeader(label, Modifier.weight(1f))
+                    if (info.isNotEmpty()) Text(info, Modifier.weight(2f, fill = false).padding(start = 8.dp),
+                        style = MaterialTheme.typography.labelSmall, color = t.secondary, textAlign = TextAlign.End)
+                }
+                g.rows.forEach { e ->
+                    key(e.ts) {
+                        HorizontalDivider(color = t.innerDivider)
+                        val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
+                            if (v != SwipeToDismissBoxValue.Settled) {
+                                vm.delete(e)
+                                scope.launch {
+                                    snack.currentSnackbarData?.dismiss()
+                                    if (snack.showSnackbar("Deleted", "Undo", duration = SnackbarDuration.Short) ==
+                                        SnackbarResult.ActionPerformed) vm.restore(e)
+                                }
+                                true
+                            } else false
+                        })
+                        SwipeToDismissBox(state, backgroundContent = {
+                            Box(Modifier.fillMaxSize().background(cs.error).padding(16.dp), Alignment.CenterEnd) {
+                                Text("Delete", color = cs.onError)
+                            }
+                        }) {
+                            Row(Modifier.fillMaxWidth().background(t.card).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                Text(e.anxiety?.toString() ?: "–", Modifier.width(40.dp),
+                                    style = MaterialTheme.typography.titleLarge, fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold)
+                                Column(Modifier.weight(1f)) {
+                                    Text(e.dateTime.format(timeFmt), style = MaterialTheme.typography.bodyLarge)
+                                    val detail = detailLine(e)
+                                    if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
+                                        color = t.secondary)
+                                }
                             }
                         }
-                        HorizontalDivider(color = cs.outlineVariant)
                     }
                 }
             }
@@ -863,9 +1101,8 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
 
 @Composable
 private fun SettingsSection(title: String, hint: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        SectionHeader(title, Modifier.padding(bottom = 6.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    SectionCard(spacing = 0.dp) {
+        Text(title, Modifier.padding(bottom = 6.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         content()
         if (hint != null) Caption(hint, Modifier.padding(top = 6.dp))
     }
@@ -909,8 +1146,8 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     }
     val intervals = listOf(0, 2, 3, 4)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        ScreenTitle("Settings")
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(horizontal = 4.dp)) { ScreenTitle("Settings") }
 
         SettingsSection("Reminders",
             "A gentle nudge between 08:00 and 22:00. It clears itself after 30 minutes.") {
@@ -959,12 +1196,13 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         }
 
         SettingsSection("Causes", "The \"What's going on?\" list on the Log screen. Past entries keep their causes.") {
-            causeList.forEach { c ->
+            causeList.forEachIndexed { i, c ->
                 LabeledRow(c) {
                     IconButton(onClick = { removingCause = c }) {
                         Icon(Icons.Filled.Close, contentDescription = "Remove $c")
                     }
                 }
+                if (i < causeList.lastIndex) HorizontalDivider(color = cs.outlineVariant)
             }
             TextButton(onClick = { addingCause = true }) { Text("Add cause…") }
         }
@@ -1007,10 +1245,10 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
         val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
-        Caption("Version ${info.versionName} · installed $built", Modifier.padding(top = 8.dp))
+        Caption("Version ${info.versionName} · installed $built", Modifier.padding(start = 4.dp, top = 4.dp))
         UpdateCheckRow(ctx, PackageInfoCompat.getLongVersionCode(info))
         Caption("Updates are only checked when you tap the button; the app makes no other network calls.",
-            Modifier.padding(bottom = 48.dp))
+            Modifier.padding(start = 4.dp, bottom = 48.dp))
     }
 
     if (addingCause) {
