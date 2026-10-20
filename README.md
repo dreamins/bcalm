@@ -12,17 +12,21 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 
 ## Features
 
-- **Tap to log.** Tap a number and the entry is saved at once with everything carried over from last time. An Undo bar appears, and for two minutes further changes on the Log screen update that entry instead of creating a new one.
-- **Today summary.** Wake time, sleep quality and exercise sit in one collapsible card and reset at midnight.
-- **Medication dose** is a number picked in the Today card (recent doses are one tap). It carries over day to day until you change it and is recorded with every entry. Name, unit and usual time are set once in Settings.
-- **Night sweats, alcohol and cannabis** are yes/no answers in the Today card ("Night sweats", "Alcohol", "Cannabis"). Night sweats are answered in the morning; alcohol and cannabis are logged any time during the day and reset at midnight. The Chart tab then shows a small plain-count summary of night sweats against the previous evening's alcohol and cannabis, the previous day's anxiety and medication dose.
-- **Joy (optional, 1-5).** A second scale for how much a positive moment landed (1 = barely registered, 5 = really landed), logged only after something good, usually with a cause. It lives on the open entry only (no carry-over) and is cleared when the edit window closes. The Chart tab compares anxiety and joy by medication dose, to tell "calm" (anxiety down, joy holds) from "flat" (anxiety down, joy drifts to 1-2).
-- **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
+- **Tap to log.** Tap a number on the Log screen and the entry is saved at once, with everything carried over from last time. Any other change on the Log screen (caffeine, food, partner, causes, Today fields, joy) also logs an entry right away, with an Undo bar. If no anxiety number was tapped, the entry is saved without an anxiety level (it never copies the previous one).
+- **Edit window.** For about two minutes after a log, further changes update that same entry instead of creating a new one. Only the open entry's values are shown as selected.
+- **Today card.** Wake time, sleep quality, exercise, night sweats, alcohol and cannabis, with plain labels. The card resets at midnight.
+- **Night sweats** are answered in the morning. **Alcohol** and **cannabis** are for the day you log them. The Chart tab compares night sweats with the evening before.
+- **Medication dose** is picked on the Log screen (under Today) and carries over until you change it; it is recorded with every entry. Name, unit and usual time are set once in Settings.
+- **Joy (optional, 1-5).** A second scale for how much a positive moment landed, from "Barely" to "Really landed". Log it only after something good. It does not carry over.
+- **Joy on the Chart.** Shows the joy average and a table per medication dose of average anxiety and joy, to tell "calm" (anxiety down, joy holds) from "flat" (anxiety down, joy drifts low).
+- **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove in Settings.
+- **Top causes on the Log screen.** The top 6, ranked by recent use (recent uses count more). Joy entries rank causes separately. "More causes (N)" opens the full ranked list with use counts.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
 - **Insights chart.** Hourly average bars with single entries as dots, a "Since waking" view (hours after your wake time) with a matching note, a plain-language note on your hardest time of day (entries keep the local time where they were logged, even after travelling), and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
-- **Check for updates** in Settings compares your installed version with the latest release and links to the download. It only runs when you tap it.
+- **Check for updates** in Settings, a manual button that compares your installed version with the latest release and links to the download. Nothing is checked unless you tap it.
+- **Light and dark theme** follow the system setting, in a classic, neutral look.
 - **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once.
 
 ## Screenshots
@@ -35,7 +39,7 @@ The screenshots use generated demo data.
 
 ## CSV columns
 
-`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis, utc_offset, joy`
+`timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy`
 
 `med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files). `joy` is 1-5 (empty if not logged). `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
 
