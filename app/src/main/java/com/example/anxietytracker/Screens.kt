@@ -230,6 +230,13 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
 
     val active = activeEntry
     val last = entries.lastOrNull()
+    val showResult: (LogResult) -> Unit = { r ->
+        scope.launch {
+            snack.currentSnackbarData?.dismiss()
+            val res = snack.showSnackbar(r.message, actionLabel = "Undo", duration = SnackbarDuration.Short)
+            if (res == SnackbarResult.ActionPerformed) r.undo()
+        }
+    }
     LaunchedEffect(Unit) {
         vm.logEvents.collect { r ->
             scope.launch {
@@ -280,6 +287,27 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             }
         }
         Caption(status)
+
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Joy", style = MaterialTheme.typography.titleSmall)
+                Caption("optional — after something good")
+            }
+            Spacer(Modifier.height(6.dp))
+            Segmented(
+                options = (1..5).map { it.toString() },
+                selected = active?.joy?.minus(1),
+                allowClear = false,
+            ) { i ->
+                if (i != null) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    vm.tapJoy(i + 1)?.let(showResult)
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Caption("Barely"); Caption("Really landed")
+            }
+        }
 
         Spacer(Modifier.height(2.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -490,6 +518,38 @@ fun ChartScreen(vm: MainViewModel) {
             Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).")
         }
 
+        val joy = remember(all, range) {
+            val cutoff = if (range == 0) 0L else
+                LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            computeJoyInsights(all.filter { it.ts >= cutoff })
+        }
+        if (joy != null) {
+            Spacer(Modifier.height(4.dp))
+            SectionHeader("Joy")
+            Column {
+                HorizontalDivider(color = cs.outlineVariant)
+                SweatRowView("Joy logged ${joy.count} times · average ${"%.1f".format(joy.avg)}", null)
+                if (joy.doses.isNotEmpty()) {
+                    Text("By medication dose", Modifier.padding(top = 10.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.titleSmall)
+                    HorizontalDivider(color = cs.outlineVariant)
+                    joy.doses.forEach { r ->
+                        SweatRowView(r.label,
+                            "anxiety avg ${r.anxAvg?.let { "%.1f".format(it) } ?: "–"} (${r.anxN}) · " +
+                                "joy avg ${r.joyAvg?.let { "%.1f".format(it) } ?: "–"} (${r.joyN})")
+                    }
+                }
+                if (joy.causes.isNotEmpty()) {
+                    Text("Top joy causes", Modifier.padding(top = 10.dp, bottom = 4.dp),
+                        style = MaterialTheme.typography.titleSmall)
+                    HorizontalDivider(color = cs.outlineVariant)
+                    joy.causes.forEach { SweatRowView(it.label, "${it.n}× · avg ${"%.1f".format(it.avg)}") }
+                }
+            }
+            if (joy.doses.isNotEmpty())
+                Caption("Calm: anxiety down, joy holds at 3–5. Flat: anxiety down, joy drifts to 1–2. Plain averages, not a diagnosis.")
+        }
+
         val sweat = remember(all, range) {
             val cutoff = if (range == 0) 0L else
                 LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -654,6 +714,7 @@ private fun detailLine(e: Entry): String {
     if (e.caffeine == true) parts.add("Caffeine")
     if (e.food == false) parts.add("No food")
     if (e.partner == 2) parts.add("Partner tense")
+    if (e.joy != null) parts.add("Joy ${e.joy}")
     return parts.joinToString(" · ")
 }
 

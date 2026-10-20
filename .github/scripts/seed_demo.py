@@ -3,7 +3,7 @@
 
 usage: seed_demo.py OUTDIR TZ_OFFSET_MINUTES
 Formats mirror Store.kt: entries are '|' joined lines
-ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|alcohol|cannabis
+ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|alcohol|cannabis|offsetMin|joy
 and prefs live in shared_prefs/draft.xml.
 """
 import os
@@ -35,7 +35,7 @@ for back in range(14, -1, -1):
     sleep = random.choice([2, 3, 3, 4])
     exercise = random.random() < 0.5
     took_med = random.random() < 0.85
-    day_dose = "10" if back > 5 else "15"
+    day_dose = "5" if back > 7 else "10"   # first week 5 mg, then 10 mg
     med_time = wake + 45
     alcohol = random.random() < 0.25
     cannabis = random.random() < 0.15
@@ -64,7 +64,23 @@ for back in range(14, -1, -1):
             str(ts), str(a), b(random.random() < 0.6), b(random.random() < 0.7),
             b(exercise and h >= 12), str(random.choice([0, 0, 1, 2])), str(wake), str(sleep),
             ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
-            b(sweats), b(alcohol), b(cannabis),
+            b(sweats), b(alcohol), b(cannabis), str(tz), "",
+        ]))
+    # Joy-only entries (no anxiety value): 1-2 per day, slightly lower joy on the higher dose.
+    for _ in range(random.randint(1, 2)):
+        h = random.randint(9, 21)
+        minute = random.randint(0, 59)
+        ts = day * 86400000 + (h * 60 + minute) * 60000 - tz * 60000
+        if ts > now_ms - 60000:
+            continue
+        joy = random.choice([4, 4, 5, 3, 5] if day_dose == "5" else [3, 3, 4, 2, 3])
+        cs = ["Social"] if random.random() < 0.5 else []
+        dose = day_dose if (took_med and h * 60 + minute >= med_time) else ""
+        lines.append("|".join([
+            str(ts), "", b(random.random() < 0.6), b(random.random() < 0.7),
+            b(exercise and h >= 12), str(random.choice([0, 0, 1])), str(wake), str(sleep),
+            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
+            b(sweats), b(alcohol), b(cannabis), str(tz), str(joy),
         ]))
     prev_alcohol = alcohol
     if day_anx:
@@ -82,7 +98,7 @@ prefs = [
     ("int", "nightSweats", 1), ("long", "nightSweatsDay", today),
     ("int", "alcohol", 1), ("long", "alcoholDay", today),
     ("int", "cannabis", 0), ("long", "cannabisDay", today),
-    ("string", "medDoseNum", "15.0"), ("string", "medUnit", "mg"), ("int", "medUsualTime", 480),
+    ("string", "medDoseNum", "10.0"), ("string", "medUnit", "mg"), ("int", "medUsualTime", 480),
     ("int", "intervalHours", 3),
     ("string", "medName", ""),
 ]

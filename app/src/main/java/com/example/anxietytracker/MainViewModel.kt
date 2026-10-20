@@ -144,7 +144,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-saves the open entry with the current draft + causes (keeps its timestamp and anxiety value). */
     private fun syncActive() {
         val a = liveActive() ?: return
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, a.joy))
     }
 
     /** A non-anxiety change was made: update the open entry, or log a new one without anxiety. */
@@ -183,7 +183,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _draft.value = d
         Store.saveDraft(d)
         val ts = a?.ts ?: newTs()
-        val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts))
+        val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts), a?.joy)
         if (a == null) {
             Store.add(e)
             Reminders.cancelNotification(getApplication())
@@ -200,6 +200,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return LogResult(if (a.anxiety == null) "Logged $n" else "Updated to $n") {
             if (_active.value?.ts == a.ts) commit(a)
             restoreDraft(prevDraft)
+        }
+    }
+
+    /**
+     * A joy number was tapped (1..5). With an open entry it sets that entry's joy (the same number again clears it);
+     * otherwise it logs a new entry with joy and no anxiety. Joy is never part of the carried-over draft.
+     */
+    fun tapJoy(n: Int): LogResult? {
+        val a = liveActive()
+        if (a == null) {
+            val e = Store.entryFrom(_draft.value.copy(anxiety = null), orderedCauses(), newTs(), joy = n)
+            Store.add(e)
+            Reminders.cancelNotification(getApplication())
+            arm(e)
+            return LogResult("Logged joy $n") {
+                Store.delete(e)
+                if (_active.value?.ts == e.ts) {
+                    expireJob?.cancel()
+                    expireJob = null
+                    _active.value = null
+                }
+            }
+        }
+        val newJoy = if (a.joy == n) null else n
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, newJoy))
+        return LogResult(if (newJoy == null) "Joy cleared" else "Joy set to $newJoy") {
+            if (_active.value?.ts == a.ts) commit(a)
         }
     }
 

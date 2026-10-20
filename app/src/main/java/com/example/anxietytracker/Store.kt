@@ -171,11 +171,11 @@ object Store {
     fun removeCause(name: String) = saveCauses(_causeList.value - name)
 
     // ---- entries ----
-    fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis(), offsetMin: Int? = localOffsetMin(ts)): Entry {
+    fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis(), offsetMin: Int? = localOffsetMin(ts), joy: Int? = null): Entry {
         val n = d.normalized()
         return Entry(ts, n.anxiety, n.caffeine, n.food, n.exercise, n.partner, n.wakeMin, n.sleep, causes,
             _medDose.value, medUsualTime, _medDose.value?.let { medUnit.ifBlank { null } },
-            _medDose.value?.let { medName.ifBlank { null } }, n.nightSweats, n.alcohol, n.cannabis, offsetMin)
+            _medDose.value?.let { medName.ifBlank { null } }, n.nightSweats, n.alcohol, n.cannabis, offsetMin, joy)
     }
 
     @Synchronized
@@ -245,7 +245,7 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin)).joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin), n(e.joy)).joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -268,7 +268,8 @@ object Store {
                 p.getOrNull(13)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(14)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(15)?.let { i(it) }?.let { it == 1 },
-                p.getOrNull(16)?.let { i(it) } ?: localOffsetMin(ts))
+                p.getOrNull(16)?.let { i(it) } ?: localOffsetMin(ts),
+                p.getOrNull(17)?.let { i(it) }?.takeIf { it in 1..5 })
         }.sortedBy { it.ts }
     }
 }

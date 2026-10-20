@@ -165,6 +165,48 @@ fun computeSweatInsights(all: List<Entry>, fromMs: Long = 0L): SweatInsights? {
     return SweatInsights(nights.size, nights.count { it.sweat }, lines)
 }
 
+/** One row of the joy-by-dose table; averages are null when that side has no entries. */
+data class DoseRow(val label: String, val anxN: Int, val anxAvg: Double?, val joyN: Int, val joyAvg: Double?)
+
+data class JoyCauseRow(val label: String, val n: Int, val avg: Double)
+
+data class JoyInsights(
+    val count: Int,
+    val avg: Double,
+    val doses: List<DoseRow>,
+    val causes: List<JoyCauseRow>,
+)
+
+/**
+ * Joy summary over [all] (already limited to the chosen range). Entries without anxiety never touch the anxiety
+ * averages; entries without joy never touch the joy ones. Returns null until at least 3 joy entries exist.
+ */
+fun computeJoyInsights(all: List<Entry>): JoyInsights? {
+    val joyEntries = all.filter { it.joy != null }
+    if (joyEntries.size < 3) return null
+    val avg = joyEntries.map { it.joy!! }.average()
+
+    // Group by the dose recorded on each entry: numeric value first (no dose number sorts last), then label.
+    val groups = all.filter { it.medLabel != null }
+        .groupBy { (it.medDose ?: Double.MAX_VALUE) to it.medLabel!! }
+        .toSortedMap(compareBy<Pair<Double, String>>({ it.first }, { it.second }))
+    val doses = groups.mapNotNull { (key, es) ->
+        val anx = es.mapNotNull { it.anxiety }
+        val joy = es.mapNotNull { it.joy }
+        if (anx.size < 3 && joy.size < 3) null
+        else DoseRow(key.second, anx.size, anx.takeIf { it.isNotEmpty() }?.average(),
+            joy.size, joy.takeIf { it.isNotEmpty() }?.average())
+    }
+
+    val causes = joyEntries.flatMap { e -> e.causes.distinct().map { it to e.joy!! } }
+        .groupBy({ it.first }, { it.second })
+        .filter { it.value.size >= 2 }
+        .map { JoyCauseRow(it.key, it.value.size, it.value.average()) }
+        .sortedWith(compareByDescending<JoyCauseRow> { it.avg }.thenByDescending { it.n }.thenBy { it.label })
+        .take(5)
+    return JoyInsights(joyEntries.size, avg, doses, causes)
+}
+
 /** Best [width]-wide window (start in [starts], by [key]) with >= 3 entries and mean >= 0.3 above [avg]; "<label> (avg x, vs y overall)." or null. */
 private fun hardestWindow(
     data: List<Entry>, avg: Double, width: Int, starts: IntRange, key: (Entry) -> Int, label: (Int) -> String,

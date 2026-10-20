@@ -16,6 +16,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Today summary.** Wake time, sleep quality and exercise sit in one collapsible card and reset at midnight.
 - **Medication dose** is a number picked in the Today card (recent doses are one tap). It carries over day to day until you change it and is recorded with every entry. Name, unit and usual time are set once in Settings.
 - **Night sweats, alcohol and cannabis** are yes/no answers in the Today card ("Night sweats", "Alcohol", "Cannabis"). Night sweats are answered in the morning; alcohol and cannabis are logged any time during the day and reset at midnight. The Chart tab then shows a small plain-count summary of night sweats against the previous evening's alcohol and cannabis, the previous day's anxiety and medication dose.
+- **Joy (optional, 1-5).** A second scale for how much a positive moment landed (1 = barely registered, 5 = really landed), logged only after something good, usually with a cause. It lives on the open entry only (no carry-over) and is cleared when the edit window closes. The Chart tab compares anxiety and joy by medication dose, to tell "calm" (anxiety down, joy holds) from "flat" (anxiety down, joy drifts to 1-2).
 - **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove.
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
@@ -34,9 +35,9 @@ The screenshots use generated demo data.
 
 ## CSV columns
 
-`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis, utc_offset`
+`timestamp, date, time, anxiety, caffeine, food_3h, exercise_today, partner, wake_time, sleep_quality, med_dose, med_time, causes, med_unit, med_name, night_sweats, alcohol, cannabis, utc_offset, joy`
 
-`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files); `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
+`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files). `joy` is 1-5 (empty if not logged). `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
 
 ## Privacy
 

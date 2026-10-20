@@ -55,6 +55,7 @@ data class Entry(
     val alcohol: Boolean? = null,
     val cannabis: Boolean? = null,
     val offsetMin: Int? = null,   // UTC offset (minutes) where it was logged; null = device zone
+    val joy: Int? = null,         // 1..5, optional: how much a positive moment landed (no carry-over)
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
@@ -127,6 +128,7 @@ fun Entry.summary(): String {
     fun yn(b: Boolean?) = when (b) { true -> "Yes"; false -> "No"; null -> "-" }
     return buildString {
         append("Anxiety ${anxiety ?: "-"}")
+        if (joy != null) append("  Joy $joy")
         append("  Caf ${yn(caffeine)}  Food ${yn(food)}  Ex ${yn(exercise)}")
         append("\nPartner ${partner?.let { PARTNER_DISPLAY[it] } ?: "-"}")
         append("  Wake ${wakeMin?.let { fmtMin(it) } ?: "-"}  Sleep ${sleep ?: "-"}")
@@ -141,7 +143,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -162,6 +164,7 @@ object Csv {
                 e.medName?.replace(",", " ") ?: "",
                 b(e.nightSweats), b(e.alcohol), b(e.cannabis),
                 e.offsetMin?.toString() ?: "",
+                e.joy?.toString() ?: "",
             ).joinToString(","))
             append('\n')
         }
@@ -192,6 +195,7 @@ object Csv {
                 col("causes")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
                 dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
                 bool("night_sweats"), bool("alcohol"), bool("cannabis"), off ?: localOffsetMin(ts),
+                col("joy")?.toIntOrNull()?.takeIf { it in 1..5 },
             )
         }
         return out
