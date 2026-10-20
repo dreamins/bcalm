@@ -314,7 +314,7 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             Text("What's going on?", style = MaterialTheme.typography.titleSmall)
             Caption("optional")
         }
-        CausesList(causes, sel, vm)
+        CausesList(causes, sel, entries, active, vm)
 
         Spacer(Modifier.height(2.dp))
         LabeledRow("Caffeine") {
@@ -418,13 +418,36 @@ private fun DoseDialog(initial: Double?, unit: String, onDismiss: () -> Unit, on
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
+private const val TOP_CAUSES = 6
+
 @Composable
-fun CausesList(causes: List<String>, sel: Set<String>, vm: MainViewModel) {
+fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, active: Entry?, vm: MainViewModel) {
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<String?>(null) }
+    var showAll by remember { mutableStateOf(false) }
+    // Ranking snapshot: computed on first show, refreshed only once the edit window has closed
+    // (and the sheet is not open), so rows never jump under the user's finger.
+    var ranking by remember {
+        mutableStateOf(rankCauses(entries, causes, active?.joy != null && active.anxiety == null, System.currentTimeMillis()))
+    }
+    val windowClosed = active == null
+    LaunchedEffect(windowClosed, showAll) {
+        if (windowClosed && !showAll) {
+            ranking = rankCauses(entries, causes, false, System.currentTimeMillis())
+        }
+    }
+    // Removed causes drop out of the snapshot; newly added ones join at the end.
+    val ranked = remember(ranking, causes) {
+        val known = causes.toHashSet()
+        val inSnap = ranking.mapTo(HashSet()) { it.name }
+        ranking.filter { it.name in known } + causes.filter { it !in inSnap }.map { RankedCause(it, 0) }
+    }
+    val top = ranked.take(TOP_CAUSES).map { it.name }
+    val shown = top + ranked.map { it.name }.filter { it in sel && it !in top }
+    val hidden = ranked.size - shown.size
     Column {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        causes.chunked(2).forEach { pair ->
+        shown.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 pair.forEach { c ->
                     CheckRow(c, c in sel, Modifier.weight(1f), onLongClick = { removing = c }) { vm.toggleCause(c) }
@@ -432,7 +455,41 @@ fun CausesList(causes: List<String>, sel: Set<String>, vm: MainViewModel) {
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        TextButton(onClick = { adding = true }) { Text("Add cause…") }
+        Row {
+            if (hidden > 0) TextButton(onClick = { showAll = true }) { Text("More causes… ($hidden)") }
+            TextButton(onClick = { adding = true }) { Text("Add cause…") }
+        }
+    }
+    if (showAll) {
+        val cs = MaterialTheme.colorScheme
+        ModalBottomSheet(onDismissRequest = { showAll = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                items(ranked, key = { it.name }) { rc ->
+                    val selected = rc.name in sel
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                        .clickable(role = Role.Checkbox) { vm.toggleCause(rc.name) }
+                        .padding(horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(rc.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) cs.primary else cs.onSurface)
+                        if (rc.uses > 0) Text("${rc.uses}×", style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+                        Box(Modifier.width(26.dp), contentAlignment = Alignment.CenterEnd) {
+                            if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
+                                modifier = Modifier.size(18.dp), tint = cs.primary)
+                        }
+                    }
+                    HorizontalDivider(color = cs.outlineVariant)
+                }
+                item {
+                    TextButton(onClick = { adding = true }) { Text("Add cause…") }
+                    Spacer(Modifier.height(24.dp))
+                }
+            }
+        }
     }
     if (adding) {
         var text by remember { mutableStateOf("") }
