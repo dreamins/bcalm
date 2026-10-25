@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.OutputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Writes the full CSV to a user-chosen document (picked via the Storage Access Framework,
@@ -26,7 +27,9 @@ object CsvSync {
     }
 
     fun enqueue(ctx: Context) {
-        val req = OneTimeWorkRequestBuilder<CsvSyncWorker>().build()
+        val req = OneTimeWorkRequestBuilder<CsvSyncWorker>()
+            .setInitialDelay(3, TimeUnit.SECONDS)
+            .build()
         WorkManager.getInstance(ctx.applicationContext)
             .enqueueUniqueWork(WORK, ExistingWorkPolicy.REPLACE, req)
     }

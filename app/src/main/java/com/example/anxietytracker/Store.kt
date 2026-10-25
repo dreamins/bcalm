@@ -145,7 +145,7 @@ object Store {
     private fun clean(s: String) = s.trim().replace(Regex("[;|,\n]"), " ").take(30)
 
     // ---- causes list (presets + custom; user can remove any) ----
-    val PRESET_CAUSES = listOf("Wife texted", "Work", "Money", "Health worry", "Conflict",
+    val PRESET_CAUSES = listOf("Relationship", "Work", "Money", "Health worry", "Conflict",
         "Social", "News/phone", "Deadline", "No clear reason")
     private val _causeList = MutableStateFlow<List<String>>(emptyList())
     val causeList: StateFlow<List<String>> = _causeList
