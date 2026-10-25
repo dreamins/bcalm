@@ -3,6 +3,7 @@ package com.example.anxietytracker
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.Crossfade
@@ -231,7 +232,9 @@ private fun QuietToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit)
                 .then(if (on) Modifier.background(t.accent) else Modifier.border(1.dp, t.secondary, CircleShape)),
         )
         Spacer(Modifier.width(8.dp))
-        Text(label, fontSize = 13.sp, color = if (on) t.ink.copy(alpha = 0.7f) else t.secondary.copy(alpha = 0.7f))
+        Text(label, fontSize = 13.sp, color = if (on) t.ink.copy(alpha = 0.85f) else t.secondary.copy(alpha = 0.7f))
+        Spacer(Modifier.width(6.dp))
+        Text(if (on) "on" else "off", fontSize = 11.sp, color = if (on) t.accent else t.secondary.copy(alpha = 0.55f))
     }
 }
 
@@ -342,13 +345,23 @@ fun BreatheScreen(onFinish: (after: Int?) -> Unit) {
                 if (hapticsRef.value) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             }
             run.lastLung = lung
-            gain.v = 0.08f + 0.92f * lung
+            gain.v = 0.35f + 0.65f * lung
             frame.value = Frame(lung, ring(0), ring(1), ring(2), shimmer, (bb / end).coerceIn(0f, 1f), alpha, kind)
         }
     }
 
+    var mediaMuted by remember { mutableStateOf(false) }
     LaunchedEffect(sound, finished) {
         if (sound && !finished) playNoise(gain)
+    }
+    // Polled while sound is on, so the caption follows the volume keys.
+    LaunchedEffect(sound) {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        while (sound && am != null) {
+            mediaMuted = am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
+            delay(1000)
+        }
+        mediaMuted = false
     }
 
     val word by remember {
@@ -424,12 +437,15 @@ fun BreatheScreen(onFinish: (after: Int?) -> Unit) {
                             })
                         }
                     }
-                    Row(
+                    Column(
                         Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 20.dp),
-                        horizontalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        QuietToggle("Haptics", haptics) { haptics = it; CalmPrefs.putBool(ctx, "haptics", it) }
-                        QuietToggle("Sound", sound) { sound = it; CalmPrefs.putBool(ctx, "sound", it) }
+                        if (sound && mediaMuted) Text("Media volume is off", fontSize = 12.sp, color = t.secondary.copy(alpha = 0.6f))
+                        Row(horizontalArrangement = Arrangement.Center) {
+                            QuietToggle("Haptics", haptics) { haptics = it; CalmPrefs.putBool(ctx, "haptics", it) }
+                            QuietToggle("Sound", sound) { sound = it; CalmPrefs.putBool(ctx, "sound", it) }
+                        }
                     }
                 }
             }
@@ -439,7 +455,8 @@ fun BreatheScreen(onFinish: (after: Int?) -> Unit) {
 }
 
 /**
- * Streams soft brown noise until cancelled; [gain] (0..1) is smoothed per sample. Fades in on start,
+ * Streams soft "surf" noise (white noise low-passed at ~1 kHz with a gentle second pole, rumble below ~120 Hz removed;
+ * ~-12 dBFS RMS at full gain) until cancelled. [gain] (0..1) is smoothed per sample. Fades in on start,
  * fades out and releases the track on cancellation.
  */
 private suspend fun playNoise(gain: GainBox): Unit = withContext(Dispatchers.Default) {
@@ -470,19 +487,32 @@ private suspend fun playNoise(gain: GainBox): Unit = withContext(Dispatchers.Def
     }
     val buf = ShortArray(chunk)
     val rnd = Random(System.nanoTime())
-    var brown = 0f
+    // One-pole filters at 22.05 kHz: low-pass ~1 kHz, softer second pole, high-pass ~120 Hz.
+    val lp1 = 0.248f
+    val lp2 = 0.5f
+    val hpK = 0.9664f
+    val norm = 1.48f   // brings the filtered white noise to ~0.25 RMS
+    var y1 = 0f
+    var y2 = 0f
+    var hp = 0f
+    var prev = 0f
     var g = gain.v
     var master = 0f
     fun render(fadeStep: Float) {
         for (i in 0 until chunk) {
-            brown = (brown + 0.02f * (rnd.nextFloat() * 2f - 1f)) / 1.02f
+            y1 += lp1 * ((rnd.nextFloat() * 2f - 1f) - y1)
+            y2 += lp2 * (y1 - y2)
+            hp = hpK * (hp + y2 - prev)
+            prev = y2
             g += (gain.v - g) * 0.0004f
             master = (master + fadeStep).coerceIn(0f, 1f)
-            val s = (brown * 4f * g * master * 0.5f).coerceIn(-1f, 1f)
+            val s = (hp * norm * g * master).coerceIn(-1f, 1f)
             buf[i] = (s * 32767f).toInt().toShort()
         }
     }
     try {
+        render(1f / rate)
+        if (track.write(buf, 0, chunk) < 0) return@withContext   // prime the buffer, then start
         track.play()
         while (isActive) {
             render(1f / rate)

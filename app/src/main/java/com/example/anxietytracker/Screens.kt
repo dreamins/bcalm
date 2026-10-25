@@ -7,6 +7,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -362,6 +364,13 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val calm = entries.lastOrNull { (it.anxiety ?: 0) >= 6 && it.after == null && it.ts !in dismissed && now - it.ts <= 30 * 60_000L }
     var lastCalm by remember { mutableStateOf<Entry?>(null) }
     if (calm != null && calm != lastCalm) lastCalm = calm   // kept so the card can animate out
+    var sheetOpen by remember { mutableStateOf(false) }
+    // Entries whose pop-up already opened by itself (seeded with the open one, so returning to this tab doesn't re-pop).
+    val autoOpened = remember { mutableSetOf<Long>().apply { vm.activeEntry.value?.let { if ((it.anxiety ?: 0) >= 6) add(it.ts) } } }
+    LaunchedEffect(calm?.ts, active?.ts, (active?.anxiety ?: 0) >= 6) {
+        val a = active
+        if (calm != null && a != null && a.ts == calm.ts && (a.anxiety ?: 0) >= 6 && autoOpened.add(calm.ts)) sheetOpen = true
+    }
     var confirm by remember { mutableStateOf<Long?>(null) }
     var confirmText by remember { mutableStateOf("") }
     LaunchedEffect(confirm) { if (confirm != null) { delay(3000); confirm = null } }
@@ -393,6 +402,13 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             }
         }
         else -> "Nothing logged yet"
+    }
+
+    if (sheetOpen) (calm ?: lastCalm)?.let { e ->
+        CalmSheet(e, active?.ts == e.ts, sel, causes, entries, cards, vm,
+            onClose = { sheetOpen = false },
+            onNotNow = { Store.dismissCalm(e.ts); dismissed = dismissed + e.ts; sheetOpen = false },
+            onRated = { n -> confirmText = "${e.anxiety} → $n"; confirm = e.ts })
     }
 
     val anyDailyUnset = d.wakeMin == null || d.sleep == null || d.exercise == null
@@ -433,11 +449,11 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
                     Caption(status)
                 }
             }
-            AnimatedVisibility(calm != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                lastCalm?.let { e ->
-                    CalmCard(e, cards, Modifier.padding(top = 14.dp), onDismiss = {
-                        Store.dismissCalm(e.ts); dismissed = dismissed + e.ts
-                    }, onRated = { n -> confirmText = "${e.anxiety} → $n"; confirm = e.ts }, vm = vm)
+            AnimatedVisibility(calm != null && !sheetOpen, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                Box(Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
+                    .clickable(role = Role.Button) { sheetOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Text("A calmer moment ›", fontSize = 12.sp, color = t.accent)
                 }
             }
             AnimatedVisibility(confirm != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
@@ -593,42 +609,76 @@ private fun SupportRow() {
     }
 }
 
-/** Shown under the Anxiety card after a high log: the entry's calm cards, Breathe/Ground, and a re-rating. */
+/**
+ * Pop-up after a high log: top causes as chips (they update the open entry like the Log grid), the picked
+ * causes' calm cards, Breathe/Ground, and a re-rating. Any rating closes it; "Not now" dismisses it for good.
+ */
 @Composable
-private fun CalmCard(e: Entry, cards: Map<String, CauseCard>, modifier: Modifier, onDismiss: () -> Unit,
-                     onRated: (Int) -> Unit, vm: MainViewModel) {
+private fun CalmSheet(e: Entry, editing: Boolean, sel: Set<String>, causes: List<String>, entries: List<Entry>,
+                      cards: Map<String, CauseCard>, vm: MainViewModel, onClose: () -> Unit,
+                      onNotNow: () -> Unit, onRated: (Int) -> Unit) {
     val t = MaterialTheme.bcalm
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val hideThen: (() -> Unit) -> Unit = { then -> scope.launch { state.hide() }.invokeOnCompletion { then() } }
     var tool by remember { mutableStateOf<String?>(null) }
+    // Same ranking as the Log screen, frozen per entry so chips never jump under the finger.
+    val top = remember(e.ts) { rankCauses(entries, causes, false, System.currentTimeMillis()).take(TOP_CAUSES).map { it.name } }
+    val picked = if (editing) sel else e.causes.toSet()
+    val shown = top + picked.filter { it !in top && it in causes }
     val withText = e.causes.mapNotNull { c ->
         cards[c]?.takeIf { it.thought.isNotBlank() || it.todo.isNotBlank() }?.let { c to it }
     }
     val cardShown = withText.isNotEmpty()
     val support = (e.anxiety ?: 0) >= 8 || e.causes.any { cards[it]?.heavy == true }
-    SectionCard(modifier) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { CardHeader("A calmer moment") }
-            Icon(Icons.Filled.Close, contentDescription = "Dismiss",
-                modifier = Modifier.size(32.dp).clip(CellShape).clickable(role = Role.Button, onClick = onDismiss)
-                    .padding(8.dp), tint = t.secondary)
-        }
-        if (support) SupportRow()
-        withText.forEach { (c, card) ->
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(c, fontSize = 12.sp, color = t.secondary)
-                if (card.thought.isNotBlank()) Text(card.thought, fontSize = 17.sp, lineHeight = 24.sp, color = t.ink)
-                if (card.todo.isNotBlank()) Text("Do: ${card.todo}", fontSize = 14.sp, color = t.secondary)
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = state, containerColor = t.card) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { CardHeader("A calmer moment") }
+                TextButton(onClick = { hideThen(onNotNow) }) { Text("Not now", color = t.secondary) }
             }
-        }
-        if (!cardShown) e.causes.firstOrNull()?.let { Caption("Write a calm thought for $it later in Settings") }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { tool = "breathe" }, Modifier.weight(1f), shape = SmallShape) { Text("Breathe") }
-            OutlinedButton(onClick = { tool = "ground" }, Modifier.weight(1f), shape = SmallShape) { Text("Ground") }
-        }
-        Text("How is it now?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        ScaleRow(10, null, height = 40.dp, gap = 4.dp, allowClear = false) { i ->
-            if (i != null) {
-                vm.setAfter(e.ts, i + 1, if (cardShown) "card" else null)
-                onRated(i + 1)
+            if (support) SupportRow()
+            if (editing || e.causes.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (editing) {
+                        Text("What's it about?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            shown.forEach { c ->
+                                FilterChip(selected = c in picked, onClick = { vm.toggleCause(c) },
+                                    label = { Text(c, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = t.accentTint, selectedLabelColor = t.accent))
+                            }
+                        }
+                    }
+                    Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        withText.forEach { (c, card) ->
+                            key(c) {
+                                AnimatedVisibility(remember { MutableTransitionState(false).apply { targetState = true } },
+                                    enter = expandVertically() + fadeIn()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(c, fontSize = 12.sp, color = t.secondary)
+                                        if (card.thought.isNotBlank()) Text(card.thought, fontSize = 17.sp, lineHeight = 24.sp, color = t.ink)
+                                        if (card.todo.isNotBlank()) Text("Do: ${card.todo}", fontSize = 14.sp, color = t.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { tool = "breathe" }, Modifier.weight(1f), shape = SmallShape) { Text("Breathe") }
+                OutlinedButton(onClick = { tool = "ground" }, Modifier.weight(1f), shape = SmallShape) { Text("Ground") }
+            }
+            Text("How is it now?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            ScaleRow(10, null, height = 40.dp, gap = 4.dp, allowClear = false) { i ->
+                if (i != null) {
+                    vm.setAfter(e.ts, i + 1, if (cardShown) "card" else null)
+                    onRated(i + 1)
+                    hideThen(onClose)
+                }
             }
         }
     }
@@ -640,6 +690,7 @@ private fun CalmCard(e: Entry, cards: Map<String, CauseCard>, modifier: Modifier
                 onRated(n)
             }
             tool = null
+            if (n != null) hideThen(onClose)
         }
         Dialog(onDismissRequest = { finish(null) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             if (which == "breathe") BreatheScreen(onFinish = finish) else GroundScreen(onFinish = finish)
