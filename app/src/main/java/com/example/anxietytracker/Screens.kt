@@ -4,6 +4,13 @@ package com.example.anxietytracker
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -63,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -347,6 +356,15 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
 
     val active = activeEntry
     val last = entries.lastOrNull()
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    var dismissed by remember { mutableStateOf(Store.dismissedCalm()) }
+    // Calm card target: the latest high log of the last 30 min not yet re-rated or dismissed (survives reopening).
+    val calm = entries.lastOrNull { (it.anxiety ?: 0) >= 6 && it.after == null && it.ts !in dismissed && now - it.ts <= 30 * 60_000L }
+    var lastCalm by remember { mutableStateOf<Entry?>(null) }
+    if (calm != null && calm != lastCalm) lastCalm = calm   // kept so the card can animate out
+    var confirm by remember { mutableStateOf<Long?>(null) }
+    var confirmText by remember { mutableStateOf("") }
+    LaunchedEffect(confirm) { if (confirm != null) { delay(3000); confirm = null } }
     val lastAnxiety = entries.lastOrNull { it.anxiety != null }
         ?.let { "Last: ${it.anxiety} at ${it.dateTime.format(timeFmt)}" }
     val showResult: (LogResult) -> Unit = { r ->
@@ -388,30 +406,45 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
             Text("How are you right now?", style = MaterialTheme.typography.titleLarge)
         }
 
-        SectionCard {
-            CardHeader("Anxiety", lastAnxiety)
-            ScaleRow(10, active?.anxiety?.minus(1), height = 46.dp, gap = 4.dp, allowClear = false) { i ->
-                if (i != null) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val r = vm.tapAnxiety(i + 1)
-                    if (r != null) scope.launch {
-                        snack.currentSnackbarData?.dismiss()
-                        val res = snack.showSnackbar(r.message, actionLabel = "Undo",
-                            duration = SnackbarDuration.Short)
-                        if (res == SnackbarResult.ActionPerformed) r.undo()
+        Column {
+            SectionCard {
+                CardHeader("Anxiety", lastAnxiety)
+                ScaleRow(10, active?.anxiety?.minus(1), height = 46.dp, gap = 4.dp, allowClear = false) { i ->
+                    if (i != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val r = vm.tapAnxiety(i + 1)
+                        if (r != null) scope.launch {
+                            snack.currentSnackbarData?.dismiss()
+                            val res = snack.showSnackbar(r.message, actionLabel = "Undo",
+                                duration = SnackbarDuration.Short)
+                            if (res == SnackbarResult.ActionPerformed) r.undo()
+                        }
                     }
                 }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Caption("Calm"); Caption("Overwhelmed")
-            }
-            if (active != null) {
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
-                    .padding(horizontal = 10.dp, vertical = 7.dp)) {
-                    Text(status, fontSize = 12.sp, color = t.accent)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Caption("Calm"); Caption("Overwhelmed")
                 }
-            } else {
-                Caption(status)
+                if (active != null) {
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
+                        .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                        Text(status, fontSize = 12.sp, color = t.accent)
+                    }
+                } else {
+                    Caption(status)
+                }
+            }
+            AnimatedVisibility(calm != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                lastCalm?.let { e ->
+                    CalmCard(e, cards, Modifier.padding(top = 14.dp), onDismiss = {
+                        Store.dismissCalm(e.ts); dismissed = dismissed + e.ts
+                    }, onRated = { n -> confirmText = "${e.anxiety} → $n"; confirm = e.ts }, vm = vm)
+                }
+            }
+            AnimatedVisibility(confirm != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                Box(Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
+                    .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Text(confirmText, fontSize = 12.sp, color = t.accent)
+                }
             }
         }
 
@@ -532,6 +565,86 @@ private fun DoseDialog(initial: Double?, unit: String, onDismiss: () -> Unit, on
         },
         confirmButton = { TextButton(onClick = { value?.let(onOk) }, enabled = value != null) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+/** Quiet support options: dial a configured number (no call permission) and/or read a custom step. */
+@Composable
+private fun SupportRow() {
+    val ctx = LocalContext.current
+    val t = MaterialTheme.bcalm
+    val contacts = listOf(Store.crisisLabel to Store.crisisNumber, Store.personLabel to Store.personNumber)
+        .filter { it.second.isNotBlank() }
+    val step = Store.customStep
+    if (contacts.isEmpty() && step.isBlank()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Caption("Need someone now?")
+        if (contacts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            contacts.forEach { (label, number) ->
+                OutlinedButton(onClick = {
+                    ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}")))
+                }, Modifier.weight(1f), shape = SmallShape, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(listOf(label.ifBlank { "Call" }, number).joinToString(" "), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                }
+            }
+            if (contacts.size == 1) Spacer(Modifier.weight(1f))
+        }
+        if (step.isNotBlank()) Text(step, fontSize = 14.sp, color = t.ink)
+    }
+}
+
+/** Shown under the Anxiety card after a high log: the entry's calm cards, Breathe/Ground, and a re-rating. */
+@Composable
+private fun CalmCard(e: Entry, cards: Map<String, CauseCard>, modifier: Modifier, onDismiss: () -> Unit,
+                     onRated: (Int) -> Unit, vm: MainViewModel) {
+    val t = MaterialTheme.bcalm
+    var tool by remember { mutableStateOf<String?>(null) }
+    val withText = e.causes.mapNotNull { c ->
+        cards[c]?.takeIf { it.thought.isNotBlank() || it.todo.isNotBlank() }?.let { c to it }
+    }
+    val cardShown = withText.isNotEmpty()
+    val support = (e.anxiety ?: 0) >= 8 || e.causes.any { cards[it]?.heavy == true }
+    SectionCard(modifier) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { CardHeader("A calmer moment") }
+            Icon(Icons.Filled.Close, contentDescription = "Dismiss",
+                modifier = Modifier.size(32.dp).clip(CellShape).clickable(role = Role.Button, onClick = onDismiss)
+                    .padding(8.dp), tint = t.secondary)
+        }
+        if (support) SupportRow()
+        withText.forEach { (c, card) ->
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(c, fontSize = 12.sp, color = t.secondary)
+                if (card.thought.isNotBlank()) Text(card.thought, fontSize = 17.sp, lineHeight = 24.sp, color = t.ink)
+                if (card.todo.isNotBlank()) Text("Do: ${card.todo}", fontSize = 14.sp, color = t.secondary)
+            }
+        }
+        if (!cardShown) e.causes.firstOrNull()?.let { Caption("Write a calm thought for $it later in Settings") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { tool = "breathe" }, Modifier.weight(1f), shape = SmallShape) { Text("Breathe") }
+            OutlinedButton(onClick = { tool = "ground" }, Modifier.weight(1f), shape = SmallShape) { Text("Ground") }
+        }
+        Text("How is it now?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        ScaleRow(10, null, height = 40.dp, gap = 4.dp, allowClear = false) { i ->
+            if (i != null) {
+                vm.setAfter(e.ts, i + 1, if (cardShown) "card" else null)
+                onRated(i + 1)
+            }
+        }
+    }
+    tool?.let { which ->
+        val finish: (Int?) -> Unit = { n ->
+            if (n != null) {
+                vm.setAfter(e.ts, n, which)
+                if (cardShown) vm.setAfter(e.ts, n, "card")
+                onRated(n)
+            }
+            tool = null
+        }
+        Dialog(onDismissRequest = { finish(null) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            if (which == "breathe") BreatheScreen(onFinish = finish) else GroundScreen(onFinish = finish)
+        }
+    }
 }
 
 private const val TOP_CAUSES = 6
@@ -1003,9 +1116,13 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
 
 private class DayGroup(val day: LocalDate, val rows: List<Entry>)
 
+private val TOOL_NAMES = mapOf("card" to "card", "breathe" to "breathing", "ground" to "grounding")
+
 /** Only the notable details: causes, then context that is not the unremarkable default. */
 private fun detailLine(e: Entry): String {
     val parts = ArrayList<String>(e.causes)
+    if (e.after != null) parts.add("→ ${e.after}" + e.tools.mapNotNull { TOOL_NAMES[it] }
+        .takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = " (", postfix = ")").orEmpty())
     if (e.caffeine == true) parts.add("Caffeine")
     if (e.food == false) parts.add("No food")
     if (e.partner == 2) parts.add("Partner tense")
@@ -1117,6 +1234,13 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val causeList by vm.causeList.collectAsStateWithLifecycle()
     var addingCause by remember { mutableStateOf(false) }
     var removingCause by remember { mutableStateOf<String?>(null) }
+    var editingCard by remember { mutableStateOf<String?>(null) }
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    var crisisLabel by remember { mutableStateOf(Store.crisisLabel) }
+    var crisisNumber by remember { mutableStateOf(Store.crisisNumber) }
+    var personLabel by remember { mutableStateOf(Store.personLabel) }
+    var personNumber by remember { mutableStateOf(Store.personNumber) }
+    var customStep by remember { mutableStateOf(Store.customStep) }
     var unit by remember { mutableStateOf(Store.medUnit) }
     var unitMenu by remember { mutableStateOf(false) }
     var doseText by remember { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }
@@ -1137,7 +1261,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                     if (list == null) "Not a valid CSV (no timestamp column)"
                     else Store.importEntries(list).let { n ->
                         val k = Store.restoreCauses(list)
-                        "Imported $n entries (${list.size - n} skipped)" + if (k > 0) ", $k causes restored" else ""
+                        val c = Store.restoreSettings(Csv.parseSettings(text))
+                        "Imported $n entries (${list.size - n} skipped)" + (if (k > 0) ", $k causes restored" else "") +
+                            if (c > 0) ", $c calm cards restored" else ""
                     }
                 } catch (e: Exception) { "Import failed: ${e.message ?: e.javaClass.simpleName}" }
             }
@@ -1197,7 +1323,11 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
 
         SettingsSection("Causes", "The \"What's going on?\" list on the Log screen. Past entries keep their causes.") {
             causeList.forEachIndexed { i, c ->
-                LabeledRow(c) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { editingCard = c },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(c, Modifier.weight(1f, fill = false), fontSize = 15.sp)
+                    if (c in cards) Text("  ● calm card", fontSize = 12.sp, color = MaterialTheme.bcalm.accent)
+                    Spacer(Modifier.weight(1f))
                     IconButton(onClick = { removingCause = c }) {
                         Icon(Icons.Filled.Close, contentDescription = "Remove $c")
                     }
@@ -1205,6 +1335,31 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                 if (i < causeList.lastIndex) HorizontalDivider(color = cs.outlineVariant)
             }
             TextButton(onClick = { addingCause = true }) { Text("Add cause…") }
+            Caption("Tip: a neutral name keeps the list easy to look at; details can live in the calm card.")
+        }
+
+        SettingsSection("Support", "Shown on the calm card at 8 or above, or for causes you mark.") {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = crisisLabel, onValueChange = { crisisLabel = it.take(30); Store.crisisLabel = crisisLabel },
+                    label = { Text("Label") }, placeholder = { Text("Crisis line") }, singleLine = true,
+                    shape = SmallShape, modifier = Modifier.weight(1f))
+                OutlinedTextField(value = crisisNumber, onValueChange = { v ->
+                    crisisNumber = v.filter { it.isDigit() || it in "+*#" }.take(20); Store.crisisNumber = crisisNumber
+                }, label = { Text("Number") }, singleLine = true, shape = SmallShape,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = personLabel, onValueChange = { personLabel = it.take(30); Store.personLabel = personLabel },
+                    label = { Text("Label") }, placeholder = { Text("Therapist") }, singleLine = true,
+                    shape = SmallShape, modifier = Modifier.weight(1f))
+                OutlinedTextField(value = personNumber, onValueChange = { v ->
+                    personNumber = v.filter { it.isDigit() || it in "+*#" }.take(20); Store.personNumber = personNumber
+                }, label = { Text("Number") }, singleLine = true, shape = SmallShape,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.weight(1f))
+            }
+            OutlinedTextField(value = customStep, onValueChange = { customStep = it.take(80); Store.customStep = customStep },
+                label = { Text("A step to take") }, placeholder = { Text("Something that helps, e.g. go for a walk") },
+                singleLine = true, shape = SmallShape, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         }
 
         SettingsSection("Sync to Google Drive") {
@@ -1259,6 +1414,30 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                 shape = SmallShape) },
             confirmButton = { TextButton(onClick = { vm.addCause(text); addingCause = false }) { Text("Add") } },
             dismissButton = { TextButton(onClick = { addingCause = false }) { Text("Cancel") } })
+    }
+    editingCard?.let { c ->
+        val cur = cards[c] ?: CauseCard()
+        var thought by remember(c) { mutableStateOf(cur.thought) }
+        var todo by remember(c) { mutableStateOf(cur.todo) }
+        var heavy by remember(c) { mutableStateOf(cur.heavy) }
+        AlertDialog(onDismissRequest = { editingCard = null },
+            title = { Text("Calm card · $c") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(value = thought, onValueChange = { thought = it.take(300) },
+                        label = { Text("Calm thought") }, placeholder = { Text("What you'd tell yourself when calm") },
+                        minLines = 2, shape = SmallShape, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = todo, onValueChange = { todo = it.take(200) },
+                        label = { Text("What to do") }, placeholder = { Text("One small step") },
+                        minLines = 2, shape = SmallShape, modifier = Modifier.fillMaxWidth())
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Show support options when I log this", Modifier.weight(1f), fontSize = 14.sp)
+                        Switch(heavy, { heavy = it })
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { Store.setCard(c, CauseCard(thought, todo, heavy)); editingCard = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editingCard = null }) { Text("Cancel") } })
     }
     removingCause?.let { c ->
         AlertDialog(onDismissRequest = { removingCause = null },

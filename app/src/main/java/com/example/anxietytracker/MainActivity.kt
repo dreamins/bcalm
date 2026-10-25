@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
     private fun exportCsv() {
         val dir = File(cacheDir, "exports").apply { mkdirs() }
         val f = File(dir, "anxiety_log.csv")
-        f.writeText(Csv.build(Store.entries.value))
+        f.writeText(Csv.build(Store.entries.value, Store.csvSettings()))
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"

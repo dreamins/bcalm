@@ -56,6 +56,8 @@ data class Entry(
     val cannabis: Boolean? = null,
     val offsetMin: Int? = null,   // UTC offset (minutes) where it was logged; null = device zone
     val joy: Int? = null,         // 1..5, optional: how much a positive moment landed (no carry-over)
+    val after: Int? = null,       // 1..10, optional: anxiety re-rated after a coping tool
+    val tools: List<String> = emptyList(),   // coping tools used: "card", "breathe", "ground"
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
@@ -75,6 +77,15 @@ data class Entry(
             return (m / 60f).takeIf { it <= 20f }
         }
 }
+
+/** Per-cause calm card: a thought, one small step, and whether to offer support options. */
+data class CauseCard(val thought: String = "", val todo: String = "", val heavy: Boolean = false)
+
+/** Support settings keys, in CSV order. */
+val SUPPORT_KEYS = listOf("crisisLabel", "crisisNumber", "personLabel", "personNumber", "customStep")
+
+/** Calm cards and support contacts, carried in the CSV as '#' rows after the entries. */
+data class CsvSettings(val cards: Map<String, CauseCard> = emptyMap(), val support: Map<String, String> = emptyMap())
 
 /** UTC offset in minutes of the device zone at [ts]. */
 fun localOffsetMin(ts: Long): Int =
@@ -143,11 +154,14 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy,after,tools"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
-    fun build(entries: List<Entry>): String = buildString {
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+    private fun dec(s: String) = try { java.net.URLDecoder.decode(s, "UTF-8") } catch (e: Exception) { s }
+
+    fun build(entries: List<Entry>, settings: CsvSettings = CsvSettings()): String = buildString {
         append(HEADER).append('\n')
         for (e in entries.sortedBy { it.ts }) {
             val x = e.dateTime.withNano(0)
@@ -165,14 +179,36 @@ object Csv {
                 b(e.nightSweats), b(e.alcohol), b(e.cannabis),
                 e.offsetMin?.toString() ?: "",
                 e.joy?.toString() ?: "",
+                e.after?.toString() ?: "",
+                e.tools.joinToString(";"),
             ).joinToString(","))
             append('\n')
         }
+        for ((name, c) in settings.cards)
+            append("#card,${enc(name)},${enc(c.thought)},${enc(c.todo)},${if (c.heavy) "1" else "0"}\n")
+        for (k in SUPPORT_KEYS) settings.support[k]?.let { append("#support,$k,${enc(it)}\n") }
+    }
+
+    /** Reads the '#card' / '#support' rows of [build] output; empty when there are none. */
+    fun parseSettings(text: String): CsvSettings {
+        val cards = LinkedHashMap<String, CauseCard>()
+        val support = LinkedHashMap<String, String>()
+        for (line in text.removePrefix("\uFEFF").lines().map { it.trim() }) {
+            val f = line.split(",")
+            when (f[0]) {
+                "#card" -> if (f.size >= 5) {
+                    val name = dec(f[1]).trim()
+                    if (name.isNotEmpty()) cards[name] = CauseCard(dec(f[2]), dec(f[3]), f[4] == "1")
+                }
+                "#support" -> if (f.size >= 3 && f[1] in SUPPORT_KEYS) support[f[1]] = dec(f[2])
+            }
+        }
+        return CsvSettings(cards, support)
     }
 
     /** Parses [build] output (any historical column set, matched by header name); null if no timestamp column. */
     fun parse(text: String): List<Entry>? {
-        val lines = text.removePrefix("\uFEFF").lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val lines = text.removePrefix("\uFEFF").lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
         val head = lines.firstOrNull()?.split(",")?.map { it.trim().lowercase() } ?: return null
         if ("timestamp" !in head) return null
         val out = ArrayList<Entry>()
@@ -196,6 +232,8 @@ object Csv {
                 dose, min("med_time"), col("med_unit") ?: legacyUnit, col("med_name"),
                 bool("night_sweats"), bool("alcohol"), bool("cannabis"), off ?: localOffsetMin(ts),
                 col("joy")?.toIntOrNull()?.takeIf { it in 1..5 },
+                col("after")?.toIntOrNull()?.takeIf { it in 1..10 },
+                col("tools")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
             )
         }
         return out

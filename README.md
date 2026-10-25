@@ -21,6 +21,8 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **Joy on the Chart.** Shows the joy average and a table per medication dose of average anxiety and joy, to tell "calm" (anxiety down, joy holds) from "flat" (anxiety down, joy drifts low).
 - **Causes** (Work, Deadline, News/phone, No clear reason, ...) that you can add to or remove in Settings.
 - **Top causes on the Log screen.** The top 6, ranked by recent use (recent uses count more). Joy entries rank causes separately. "More causes (N)" opens the full ranked list with use counts.
+- **Calm card.** After a log of 6 or more (for 30 minutes, with no extra taps) a card appears under the Anxiety scale with your own calm thought and one small step for the causes you picked, in either order. "Breathe" and "Ground" open a short guided exercise. Tap "How is it now?" to re-rate; it shows e.g. "6 → 4" and is saved with the entry (`after`, plus which tools you used). Dismiss it with the ×.
+- **Calm cards and support.** In Settings, tap a cause to write its calm thought and step, and optionally mark it to show support options. A Support section holds a crisis number (prefilled, editable), a second contact and a free-text step; they appear on the card at 8 or above or for marked causes, and the numbers open the dialer (no call permission).
 - **Reminders** every few hours (daytime only) that auto-dismiss after 30 minutes, with a "Same as last" action to log without opening the app.
 - **Home-screen widget.** A row of 1-10 buttons logs an entry with carried-over values, without opening the app.
 - **Insights chart.** Hourly average bars with single entries as dots, a "Since waking" view (hours after your wake time) with a matching note, a plain-language note on your hardest time of day (entries keep the local time where they were logged, even after travelling), and patterns by cause and factor (caffeine, food, exercise, partner, sleep) as differences from your average.
@@ -39,9 +41,11 @@ The screenshots use generated demo data.
 
 ## CSV columns
 
-`timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy`
+`timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy,after,tools`
 
-`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files). `joy` is 1-5 (empty if not logged). `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
+`med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files). `joy` is 1-5 (empty if not logged). `after` is 1-10, the anxiety re-rated on the calm card (empty if not used), and `tools` lists what was used, `;`-separated: `card`, `breathe`, `ground`. `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
+
+Calm cards and support contacts are included as `#`-prefixed rows after the entries (`#card,<cause>,<thought>,<todo>,<heavy>` and `#support,<key>,<value>`, text percent-encoded). Import restores them where the same item is not already set on the device; older versions of the app skip these rows.
 
 ## Privacy
 

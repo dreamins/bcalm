@@ -30,6 +30,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val entries = Store.entries
     val causeList = Store.causeList
     val medDose = Store.medDose
+    val cards = Store.cards
 
     /** The entry just logged and still open for edits (null = next number tap creates a new entry). */
     private val _active = MutableStateFlow<Entry?>(null)
@@ -108,8 +109,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** The open entry, or null if the window is closed or the entry was deleted meanwhile. */
     private fun liveActive(): Entry? {
         val a = _active.value ?: return null
-        if (Store.entries.value.none { it.ts == a.ts }) { closeWindow(); return null }
-        return a
+        // Re-read from the store so after/tools set meanwhile (setAfter) are never lost when the entry is rebuilt.
+        val cur = Store.entries.value.firstOrNull { it.ts == a.ts } ?: run { closeWindow(); return null }
+        return cur
     }
 
     private fun arm(e: Entry) {
@@ -144,7 +146,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-saves the open entry with the current draft + causes (keeps its timestamp and anxiety value). */
     private fun syncActive() {
         val a = liveActive() ?: return
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, a.joy))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, a.joy).copy(after = a.after, tools = a.tools))
     }
 
     /** A non-anxiety change was made: update the open entry, or log a new one without anxiety. */
@@ -184,6 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         Store.saveDraft(d)
         val ts = a?.ts ?: newTs()
         val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts), a?.joy)
+            .copy(after = a?.after, tools = a?.tools ?: emptyList())
         if (a == null) {
             Store.add(e)
             Reminders.cancelNotification(getApplication())
@@ -224,10 +227,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val newJoy = if (a.joy == n) null else n
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, newJoy))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, newJoy).copy(after = a.after, tools = a.tools))
         return LogResult(if (newJoy == null) "Joy cleared" else "Joy set to $newJoy") {
             if (_active.value?.ts == a.ts) commit(a)
         }
+    }
+
+    /** Records the re-rated anxiety (and coping tool) on the entry at [ts]; keeps the open entry in sync. */
+    fun setAfter(ts: Long, after: Int?, tool: String?) {
+        Store.setAfter(ts, after, tool)
+        if (_active.value?.ts == ts) _active.value = Store.entries.value.firstOrNull { it.ts == ts }
     }
 
     fun delete(e: Entry) = Store.delete(e)

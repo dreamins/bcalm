@@ -74,7 +74,7 @@ object CsvSync {
     fun write(ctx: Context, uriString: String) {
         val cr = ctx.contentResolver
         val uri = Uri.parse(uriString)
-        val bytes = Csv.build(Store.entries.value).toByteArray(Charsets.UTF_8)
+        val bytes = Csv.build(Store.entries.value, Store.csvSettings()).toByteArray(Charsets.UTF_8)
         val stream: OutputStream? = try {
             cr.openOutputStream(uri, "wt")
         } catch (e: SecurityException) {

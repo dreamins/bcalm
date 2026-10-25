@@ -27,6 +27,7 @@ object Store {
         _entries.value = readFile()
         loadCauses()
         loadMedDose()
+        loadCards()
         _syncUri.value = prefs.getString("syncUri", null)
         _syncState.value = SyncState(prefs.getLong("syncTime", 0L), prefs.getString("syncMsg", "") ?: "")
     }
@@ -168,7 +169,88 @@ object Store {
         if (add.isNotEmpty()) saveCauses(_causeList.value + add)
         return add.size
     }
-    fun removeCause(name: String) = saveCauses(_causeList.value - name)
+    fun removeCause(name: String) {
+        saveCauses(_causeList.value - name)
+        setCard(name, CauseCard())
+    }
+
+    // ---- calm cards (per cause) and support contacts: prefs; not in entries.txt, but carried in the CSV as '#' rows ----
+    private val _cards = MutableStateFlow<Map<String, CauseCard>>(emptyMap())
+    val cards: StateFlow<Map<String, CauseCard>> = _cards
+
+    private fun loadCards() {
+        _cards.value = _causeList.value.mapNotNull { c ->
+            val card = CauseCard(prefs.getString("card.thought.$c", "") ?: "",
+                prefs.getString("card.todo.$c", "") ?: "", prefs.getBoolean("card.heavy.$c", false))
+            if (card == CauseCard()) null else c to card
+        }.toMap()
+    }
+
+    /** Saves the calm card for [name]; a blank card removes it. */
+    fun setCard(name: String, card: CauseCard) {
+        val c = card.copy(thought = card.thought.trim(), todo = card.todo.trim())
+        val e = prefs.edit().remove("card.thought.$name").remove("card.todo.$name").remove("card.heavy.$name")
+        if (c == CauseCard()) {
+            _cards.value = _cards.value - name
+        } else {
+            if (c.thought.isNotEmpty()) e.putString("card.thought.$name", c.thought)
+            if (c.todo.isNotEmpty()) e.putString("card.todo.$name", c.todo)
+            if (c.heavy) e.putBoolean("card.heavy.$name", true)
+            _cards.value = _cards.value + (name to c)
+        }
+        e.apply()
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    // ---- support contacts (Settings); label + number, plus a free-text step ----
+    var crisisLabel: String
+        get() = prefs.getString("crisisLabel", "Crisis line") ?: ""
+        set(v) { prefs.edit().putString("crisisLabel", v.trim().take(30)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
+    var crisisNumber: String
+        get() = prefs.getString("crisisNumber", "988") ?: ""
+        set(v) { prefs.edit().putString("crisisNumber", v.trim().take(30)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
+    var personLabel: String
+        get() = prefs.getString("personLabel", "") ?: ""
+        set(v) { prefs.edit().putString("personLabel", v.trim().take(30)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
+    var personNumber: String
+        get() = prefs.getString("personNumber", "") ?: ""
+        set(v) { prefs.edit().putString("personNumber", v.trim().take(30)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
+    var customStep: String
+        get() = prefs.getString("customStep", "") ?: ""
+        set(v) { prefs.edit().putString("customStep", v.trim().take(80)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
+
+    /** Cards and support values for the CSV; defaults (and blanks) are included so a cleared field restores as cleared. */
+    fun csvSettings() = CsvSettings(_cards.value, mapOf("crisisLabel" to crisisLabel, "crisisNumber" to crisisNumber,
+        "personLabel" to personLabel, "personNumber" to personNumber, "customStep" to customStep))
+
+    /**
+     * Restores cards and support values from an imported CSV without overwriting local edits:
+     * a card only where the cause has none, a support field only where it is blank. Returns cards restored.
+     */
+    fun restoreSettings(s: CsvSettings): Int {
+        var n = 0
+        for ((name, c) in s.cards) {
+            if (name in _cards.value || c == CauseCard()) continue
+            addCause(name)
+            setCard(name, c); n++
+        }
+        s.support["crisisLabel"]?.takeIf { crisisLabel.isBlank() }?.let { crisisLabel = it }
+        s.support["crisisNumber"]?.takeIf { crisisNumber.isBlank() }?.let { crisisNumber = it }
+        s.support["personLabel"]?.takeIf { personLabel.isBlank() }?.let { personLabel = it }
+        s.support["personNumber"]?.takeIf { personNumber.isBlank() }?.let { personNumber = it }
+        s.support["customStep"]?.takeIf { customStep.isBlank() }?.let { customStep = it }
+        return n
+    }
+
+    // ---- calm card dismissals: entry timestamps, trimmed to the last day ----
+    fun dismissedCalm(): Set<Long> {
+        val cutoff = System.currentTimeMillis() - 24 * 3_600_000L
+        return (prefs.getString("calmDismissed", "") ?: "").split(",").mapNotNull { it.toLongOrNull() }
+            .filter { it > cutoff }.toSet()
+    }
+    fun dismissCalm(ts: Long) {
+        prefs.edit().putString("calmDismissed", (dismissedCalm() + ts).joinToString(",")).apply()
+    }
 
     // ---- entries ----
     fun entryFrom(d: Draft, causes: List<String> = emptyList(), ts: Long = System.currentTimeMillis(), offsetMin: Int? = localOffsetMin(ts), joy: Int? = null): Entry {
@@ -197,6 +279,13 @@ object Store {
         CsvSync.enqueueIfEnabled(appCtx)
         BcalmWidget.refresh(appCtx)
         return fresh.size
+    }
+
+    /** Re-rates anxiety on the entry at [ts] (any age) and notes the coping [tool] used, if any. */
+    @Synchronized
+    fun setAfter(ts: Long, after: Int?, tool: String?) {
+        val e = _entries.value.firstOrNull { it.ts == ts } ?: return
+        update(e.copy(after = after, tools = if (tool == null || tool in e.tools) e.tools else e.tools + tool))
     }
 
     /** Replaces the entry with the same timestamp (no-op if it no longer exists). */
@@ -245,7 +334,8 @@ object Store {
             fun bb(v: Boolean?) = v?.let { if (it) "1" else "0" } ?: ""
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
-                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin), n(e.joy)).joinToString("|")
+                e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin), n(e.joy),
+                n(e.after), e.tools.joinToString(";")).joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -269,7 +359,9 @@ object Store {
                 p.getOrNull(14)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(15)?.let { i(it) }?.let { it == 1 },
                 p.getOrNull(16)?.let { i(it) } ?: localOffsetMin(ts),
-                p.getOrNull(17)?.let { i(it) }?.takeIf { it in 1..5 })
+                p.getOrNull(17)?.let { i(it) }?.takeIf { it in 1..5 },
+                p.getOrNull(18)?.let { i(it) }?.takeIf { it in 1..10 },
+                p.getOrNull(19)?.split(";")?.filter { it.isNotBlank() } ?: emptyList())
         }.sortedBy { it.ts }
     }
 }
