@@ -1,5 +1,6 @@
 package com.example.anxietytracker
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -12,11 +13,12 @@ import androidx.work.WorkerParameters
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
- * Writes the full CSV to a user-chosen document (picked via the Storage Access Framework,
- * typically inside the Google Drive provider). Drive uploads the file on its own.
+ * Two-way sync with a user-chosen document (picked via the Storage Access Framework, typically inside the
+ * Google Drive provider): outside edits are merged in, then the full CSV is written back. Drive uploads the file on its own.
  */
 object CsvSync {
     private const val WORK = "csv-sync"
@@ -72,21 +74,48 @@ object CsvSync {
         return "selected file"
     }
 
-    /** Throws SecurityException / IOException on failure. */
+    private fun sha(b: ByteArray) =
+        MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+
+    /** Current bytes of the document, or null if missing/unreadable (permission loss is rethrown). */
+    private fun read(cr: ContentResolver, uri: Uri): ByteArray? = try {
+        cr.openInputStream(uri)?.use { it.readBytes() }
+    } catch (e: SecurityException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Read-merge-write: if the file differs from what the app last wrote, merge its entries/cards in
+     * (file wins), then write the full CSV. Returns true if the merge changed local data.
+     * Throws SecurityException / IOException on failure.
+     */
     @Synchronized
-    fun write(ctx: Context, uriString: String) {
+    fun sync(ctx: Context, uriString: String): Boolean {
         val cr = ctx.contentResolver
         val uri = Uri.parse(uriString)
-        val bytes = Csv.build(Store.entries.value, Store.csvSettings()).toByteArray(Charsets.UTF_8)
-        val stream: OutputStream? = try {
-            cr.openOutputStream(uri, "wt")
-        } catch (e: SecurityException) {
-            throw e
-        } catch (e: Exception) {
-            cr.openOutputStream(uri, "w")
+        val cur = read(cr, uri)?.takeIf { it.isNotEmpty() }
+        var merged = false
+        if (cur != null && sha(cur) != Store.syncHash) {
+            val text = String(cur, Charsets.UTF_8)
+            merged = Store.mergeFromFile(Csv.parse(text).orEmpty(), Csv.parseSettings(text))
         }
-        val out = stream ?: throw FileNotFoundException("no output stream")
-        out.use { it.write(bytes) }
+        val bytes = Csv.build(Store.entries.value, Store.csvSettings()).toByteArray(Charsets.UTF_8)
+        val hash = sha(bytes)
+        if (cur == null || sha(cur) != hash) {   // identical content: skip the write (no needless Drive upload)
+            val stream: OutputStream? = try {
+                cr.openOutputStream(uri, "wt")
+            } catch (e: SecurityException) {
+                throw e
+            } catch (e: Exception) {
+                cr.openOutputStream(uri, "w")
+            }
+            val out = stream ?: throw FileNotFoundException("no output stream")
+            out.use { it.write(bytes) }
+        }
+        Store.syncHash = hash
+        return merged
     }
 }
 
@@ -95,8 +124,8 @@ class CsvSyncWorker(ctx: Context, p: WorkerParameters) : Worker(ctx, p) {
         Store.init(applicationContext)
         val uri = Store.syncUri.value ?: return Result.success()
         return try {
-            CsvSync.write(applicationContext, uri)
-            Store.setSyncResult("OK")
+            val merged = CsvSync.sync(applicationContext, uri)
+            Store.setSyncResult(if (merged) "Synced (merged changes from file)" else "OK")
             Result.success()
         } catch (e: SecurityException) {
             Store.setSyncResult("Failed: permission lost — choose the file again")

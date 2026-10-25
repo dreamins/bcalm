@@ -189,18 +189,55 @@ object Csv {
         for (k in SUPPORT_KEYS) settings.support[k]?.let { append("#support,$k,${enc(it)}\n") }
     }
 
-    /** Reads the '#card' / '#support' rows of [build] output; empty when there are none. */
+    private val PCT = Regex("%[0-9A-Fa-f]{2}")
+
+    /**
+     * Text of an unquoted '#' field: percent-decoded when it has %XX sequences or looks fully encoded
+     * (no spaces, '+' between words); otherwise taken literally, so hand-typed text with '+' or '%' survives.
+     */
+    private fun smartDec(s: String): String {
+        val encoded = PCT.containsMatchIn(s) || (s.none { it.isWhitespace() } && s.drop(1).dropLast(1).contains('+'))
+        return if (encoded) dec(s) else s
+    }
+
+    /** Splits a '#' row on commas, honouring double quotes ("" = literal quote); returns (text, wasQuoted). */
+    private fun splitHash(line: String): List<Pair<String, Boolean>> {
+        val out = ArrayList<Pair<String, Boolean>>()
+        val sb = StringBuilder()
+        var quoted = false
+        var inQ = false
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
+            when {
+                inQ && ch == '"' && line.getOrNull(i + 1) == '"' -> { sb.append('"'); i++ }
+                inQ && ch == '"' -> inQ = false
+                inQ -> sb.append(ch)
+                ch == '"' && sb.isBlank() -> { inQ = true; quoted = true; sb.clear() }
+                ch == ',' -> { out += (if (quoted) sb.toString() else sb.toString().trim()) to quoted; sb.clear(); quoted = false }
+                quoted -> {}   // stray text after a closing quote is ignored
+                else -> sb.append(ch)
+            }
+            i++
+        }
+        out += (if (quoted) sb.toString() else sb.toString().trim()) to quoted
+        return out
+    }
+
+    /** Reads the '#card' / '#support' rows of [build] output, or of a hand-edited file; empty when there are none. */
     fun parseSettings(text: String): CsvSettings {
         val cards = LinkedHashMap<String, CauseCard>()
         val support = LinkedHashMap<String, String>()
         for (line in text.removePrefix("\uFEFF").lines().map { it.trim() }) {
-            val f = line.split(",")
-            when (f[0]) {
-                "#card" -> if (f.size >= 5) {
-                    val name = dec(f[1]).trim()
-                    if (name.isNotEmpty()) cards[name] = CauseCard(dec(f[2]), dec(f[3]), f[4] == "1")
+            if (!line.startsWith("#")) continue
+            val f = splitHash(line)
+            fun v(i: Int) = f[i].let { (x, q) -> if (q) x else smartDec(x) }
+            when (f[0].first) {
+                "#card" -> if (f.size >= 4) {
+                    val name = v(1).trim()
+                    if (name.isNotEmpty()) cards[name] = CauseCard(v(2), v(3), f.getOrNull(4)?.first?.trim() == "1")
                 }
-                "#support" -> if (f.size >= 3 && f[1] in SUPPORT_KEYS) support[f[1]] = dec(f[2])
+                "#support" -> if (f.size >= 3 && f[1].first in SUPPORT_KEYS) support[f[1].first] = v(2)
             }
         }
         return CsvSettings(cards, support)

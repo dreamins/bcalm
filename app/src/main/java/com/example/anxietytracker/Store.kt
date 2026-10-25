@@ -87,9 +87,14 @@ object Store {
     private val _syncState = MutableStateFlow(SyncState(0L, ""))
     val syncState: StateFlow<SyncState> = _syncState
 
+    /** Hash of the exact bytes the app last wrote to the sync file; a different hash in the file means it was edited elsewhere. */
+    var syncHash: String?
+        get() = prefs.getString("syncHash", null)
+        set(v) { prefs.edit().apply { if (v == null) remove("syncHash") else putString("syncHash", v) }.apply() }
+
     fun setSyncUri(uri: String?) {
         _syncUri.value = uri
-        val e = prefs.edit()
+        val e = prefs.edit().remove("syncHash")
         if (uri == null) e.remove("syncUri") else e.putString("syncUri", uri)
         e.apply()
         setSyncResult("")
@@ -188,6 +193,11 @@ object Store {
 
     /** Saves the calm card for [name]; a blank card removes it. */
     fun setCard(name: String, card: CauseCard) {
+        applyCard(name, card)
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    private fun applyCard(name: String, card: CauseCard) {
         val c = card.copy(thought = card.thought.trim(), todo = card.todo.trim())
         val e = prefs.edit().remove("card.thought.$name").remove("card.todo.$name").remove("card.heavy.$name")
         if (c == CauseCard()) {
@@ -199,7 +209,6 @@ object Store {
             _cards.value = _cards.value + (name to c)
         }
         e.apply()
-        CsvSync.enqueueIfEnabled(appCtx)
     }
 
     // ---- support contacts (Settings); label + number, plus a free-text step ----
@@ -240,6 +249,60 @@ object Store {
         s.support["personNumber"]?.takeIf { personNumber.isBlank() }?.let { personNumber = it }
         s.support["customStep"]?.takeIf { customStep.isBlank() }?.let { customStep = it }
         return n
+    }
+
+    /** Bumped when a sync merge changes the support fields, so Settings can reload them. */
+    private val _supportVersion = MutableStateFlow(0)
+    val supportVersion: StateFlow<Int> = _supportVersion
+
+    private val SUPPORT_LIMITS = mapOf("crisisLabel" to 30, "crisisNumber" to 30, "personLabel" to 30,
+        "personNumber" to 30, "customStep" to 80)
+
+    /**
+     * Merges a sync file edited elsewhere into local data; the file wins. Entries match by timestamp second
+     * (the CSV has no milliseconds): unknown ones are added, differing ones replaced (local ts kept). Cards in the
+     * file overwrite local ones (cause added if missing); support fields present in the file overwrite local ones.
+     * Local-only data is kept. Does not enqueue a sync. Returns true if anything changed.
+     */
+    @Synchronized
+    fun mergeFromFile(list: List<Entry>, s: CsvSettings): Boolean {
+        var changed = false
+        if (list.isNotEmpty()) {
+            val bySec = HashMap<Long, MutableList<Entry>>()
+            _entries.value.forEach { bySec.getOrPut(it.ts / 1000) { ArrayList() }.add(it) }
+            val replaced = HashMap<Long, Entry>()
+            val added = ArrayList<Entry>()
+            for (fe in list) {
+                val local = bySec[fe.ts / 1000]?.let { if (it.isEmpty()) null else it.removeAt(0) }
+                if (local == null) added += fe
+                else if (Csv.build(listOf(local)) != Csv.build(listOf(fe))) replaced[local.ts] = fe.copy(ts = local.ts)
+            }
+            if (added.isNotEmpty() || replaced.isNotEmpty()) {
+                _entries.value = (_entries.value.map { replaced[it.ts] ?: it } + added).sortedBy { it.ts }
+                writeFile()
+                BcalmWidget.refresh(appCtx)
+                changed = true
+            }
+            if (restoreCauses(list) > 0) changed = true
+        }
+        for ((name, c) in s.cards) {
+            if (c == CauseCard()) continue
+            val key = _causeList.value.firstOrNull { it.equals(name, true) }
+                ?: name.also { saveCauses(_causeList.value + it); changed = true }
+            val nc = c.copy(thought = c.thought.trim(), todo = c.todo.trim())
+            if (_cards.value[key] != nc) { applyCard(key, nc); changed = true }
+        }
+        var supportChanged = false
+        for ((k, v) in s.support) {
+            val nv = v.trim().take(SUPPORT_LIMITS[k] ?: continue)
+            val cur = when (k) {
+                "crisisLabel" -> crisisLabel; "crisisNumber" -> crisisNumber; "personLabel" -> personLabel
+                "personNumber" -> personNumber; else -> customStep
+            }
+            if (cur != nv) { prefs.edit().putString(k, nv).apply(); supportChanged = true }
+        }
+        if (supportChanged) { _supportVersion.value += 1; changed = true }
+        return changed
     }
 
     // ---- calm card dismissals: entry timestamps, trimmed to the last day ----

@@ -9,6 +9,11 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,6 +23,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,6 +46,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -59,6 +66,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
@@ -68,6 +76,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
@@ -652,15 +661,33 @@ private fun CalmSheet(e: Entry, editing: Boolean, sel: Set<String>, causes: List
                             }
                         }
                     }
-                    Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val typingKey = withText.firstOrNull { "${e.ts}|${it.first}" !in typedCards }?.let { "${e.ts}|${it.first}" }
+                    Column(Modifier.animateContentSize().then(
+                        if (typingKey == null) Modifier else Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            withText.forEach { typedCards.markTyped("${e.ts}|${it.first}") }   // tap = show everything now
+                        }), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         withText.forEach { (c, card) ->
                             key(c) {
                                 AnimatedVisibility(remember { MutableTransitionState(false).apply { targetState = true } },
                                     enter = expandVertically() + fadeIn()) {
+                                    val k = "${e.ts}|$c"
+                                    val finished = k in typedCards
+                                    val active = k == typingKey
+                                    var part by remember(k) { mutableIntStateOf(0) }
+                                    val hasTodo = card.todo.isNotBlank()
+                                    val hasThought = card.thought.isNotBlank()
+                                    // A card with only a step starts straight on the step.
+                                    val onThought = hasThought && part == 0
                                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                         Text(c, fontSize = 12.sp, color = t.secondary)
-                                        if (card.thought.isNotBlank()) Text(card.thought, fontSize = 17.sp, lineHeight = 24.sp, color = t.ink)
-                                        if (card.todo.isNotBlank()) Text("Do: ${card.todo}", fontSize = 14.sp, color = t.secondary)
+                                        if (hasThought) TypewriterText(card.thought, play = active && onThought,
+                                            instant = finished || part > 0,
+                                            onDone = { if (hasTodo) part = 1 else typedCards.markTyped(k) },
+                                            fontSize = 17.sp, lineHeight = 24.sp, color = t.ink)
+                                        if (hasTodo) TypewriterText("Do: ${card.todo}", play = active && !onThought,
+                                            instant = finished, onDone = { typedCards.markTyped(k) },
+                                            fontSize = 14.sp, color = t.secondary, startDelay = if (hasThought) 400L else 0L)
                                     }
                                 }
                             }
@@ -696,6 +723,58 @@ private fun CalmSheet(e: Entry, editing: Boolean, sel: Set<String>, causes: List
             if (which == "breathe") BreatheScreen(onFinish = finish) else GroundScreen(onFinish = finish)
         }
     }
+}
+
+/** Calm cards (entry ts + cause) already typed out this session; they show in full from then on. */
+private val typedCards = mutableStateListOf<String>()
+
+private fun MutableList<String>.markTyped(k: String) {
+    if (k in this) return
+    add(k)
+    if (size > 60) removeAt(0)
+}
+
+/**
+ * Types [text] out character by character while [play] (longer pause after punctuation), with a soft blinking
+ * caret at the end; [instant] shows it all. The untyped rest stays in the layout, transparent, so nothing reflows.
+ */
+@Composable
+private fun TypewriterText(text: String, play: Boolean, instant: Boolean, onDone: () -> Unit,
+                           fontSize: TextUnit, color: Color, lineHeight: TextUnit = TextUnit.Unspecified,
+                           startDelay: Long = 0L) {
+    val t = MaterialTheme.bcalm
+    var n by remember(text) { mutableIntStateOf(if (instant) text.length else 0) }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val done by rememberUpdatedState(onDone)
+    LaunchedEffect(text, play, instant) {
+        if (instant) { n = text.length; return@LaunchedEffect }
+        if (!play) return@LaunchedEffect
+        if (startDelay > 0) delay(startDelay)
+        while (n < text.length) {
+            delay(if (n > 0 && text[n - 1] in ".,;?!") 250L else 28L)
+            n++
+        }
+        done()
+    }
+    val caret = play && !instant && n < text.length
+    val alpha = if (caret) {
+        val a by rememberInfiniteTransition(label = "caret").animateFloat(0.1f, 0.55f,
+            infiniteRepeatable(tween(520), RepeatMode.Reverse), label = "caretAlpha")
+        a
+    } else 0f
+    val shown = buildAnnotatedString {
+        append(text.substring(0, n))
+        withStyle(SpanStyle(color = Color.Transparent)) { append(text.substring(n)) }
+    }
+    Text(shown, color = color, fontSize = fontSize, lineHeight = lineHeight,
+        onTextLayout = { layout = it },
+        modifier = Modifier.drawBehind {
+            val l = layout
+            if (alpha > 0f && l != null) {
+                val r = l.getCursorRect(n.coerceIn(0, text.length))
+                drawRect(t.accent.copy(alpha = alpha), Offset(r.left, r.top), Size(1.5.dp.toPx(), r.height))
+            }
+        })
 }
 
 private const val TOP_CAUSES = 6
@@ -1287,11 +1366,12 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     var removingCause by remember { mutableStateOf<String?>(null) }
     var editingCard by remember { mutableStateOf<String?>(null) }
     val cards by vm.cards.collectAsStateWithLifecycle()
-    var crisisLabel by remember { mutableStateOf(Store.crisisLabel) }
-    var crisisNumber by remember { mutableStateOf(Store.crisisNumber) }
-    var personLabel by remember { mutableStateOf(Store.personLabel) }
-    var personNumber by remember { mutableStateOf(Store.personNumber) }
-    var customStep by remember { mutableStateOf(Store.customStep) }
+    val supportVer by Store.supportVersion.collectAsStateWithLifecycle()   // bumps when a sync merge changes them
+    var crisisLabel by remember(supportVer) { mutableStateOf(Store.crisisLabel) }
+    var crisisNumber by remember(supportVer) { mutableStateOf(Store.crisisNumber) }
+    var personLabel by remember(supportVer) { mutableStateOf(Store.personLabel) }
+    var personNumber by remember(supportVer) { mutableStateOf(Store.personNumber) }
+    var customStep by remember(supportVer) { mutableStateOf(Store.customStep) }
     var unit by remember { mutableStateOf(Store.medUnit) }
     var unitMenu by remember { mutableStateOf(false) }
     var doseText by remember { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }

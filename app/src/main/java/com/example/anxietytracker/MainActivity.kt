@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
                     if (Build.VERSION.SDK_INT >= 33) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
                 val vm: MainViewModel = viewModel()
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh(); CsvSync.enqueueIfEnabled(ctx) }   // also picks up outside edits of the sync file
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onAppStopped() }
                 AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0))
             }

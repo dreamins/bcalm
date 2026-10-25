@@ -29,7 +29,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
 - **Check for updates** in Settings, a manual button that compares your installed version with the latest release and links to the download. Nothing is checked unless you tap it.
 - **Light and dark theme** follow the system setting, in a classic, neutral look.
-- **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once.
+- **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once. Sync is two-way: changes made to the file elsewhere are merged in on the next sync (at app start, on resume and after each change); the file wins for edited entries and calm cards, and deletions made elsewhere aren't applied.
 
 ## Screenshots
 
@@ -45,7 +45,12 @@ The screenshots use generated demo data.
 
 `med_dose` is a number (e.g. `7.5`) with its unit in `med_unit` and the medication name (if set) in `med_name`. Booleans are `1`/`0` (empty if unset), `partner` is good/neutral/tense, and multiple causes are separated by `;`. `utc_offset` is the UTC offset in minutes where the entry was logged (empty in older files). `joy` is 1-5 (empty if not logged). `after` is 1-10, the anxiety re-rated on the calm card (empty if not used), and `tools` lists what was used, `;`-separated: `card`, `breathe`, `ground`. `timestamp`, `date` and `time` are in that local time, so entries keep the time of day where they were logged after you travel.
 
-Calm cards and support contacts are included as `#`-prefixed rows after the entries (`#card,<cause>,<thought>,<todo>,<heavy>` and `#support,<key>,<value>`, text percent-encoded). Import restores them where the same item is not already set on the device; older versions of the app skip these rows.
+Calm cards and support contacts are included as `#`-prefixed rows after the entries. Import and sync restore them (import only where the same item is not already set on the device; sync lets the file win); older versions of the app skip these rows.
+
+- `#card,<cause>,<calm thought>,<what to do>,<1 or 0 for support options>` adds or replaces the card for a cause (the cause is added to the list if missing). The last field is optional and `1` shows the support options for that cause.
+- `#support,<key>,<value>` sets a support field. Keys: `crisisLabel`, `crisisNumber`, `personLabel`, `personNumber`, `customStep`.
+
+Text fields are either percent-encoded (what the app writes, e.g. `Take%20a%20walk`) or double-quoted (`"It's ok, really"`, with `""` for a quote inside); plain text without commas, quotes or `%` also works. Example: `#card,Work,"It's ok, really",Take a short walk,0`.
 
 ## Privacy
 
