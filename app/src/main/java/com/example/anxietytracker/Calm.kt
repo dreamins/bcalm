@@ -436,16 +436,13 @@ fun BreatheScreen(onFinish: (after: Int?) -> Unit) {
                                 CalmPrefs.putInt(ctx, "duration", durIdx)
                             })
                         }
-                    }
-                    Column(
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        if (sound && mediaMuted) Text("Media volume is off", fontSize = 12.sp, color = t.secondary.copy(alpha = 0.6f))
-                        Row(horizontalArrangement = Arrangement.Center) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically) {
                             QuietToggle("Haptics", haptics) { haptics = it; CalmPrefs.putBool(ctx, "haptics", it) }
                             QuietToggle("Sound", sound) { sound = it; CalmPrefs.putBool(ctx, "sound", it) }
                         }
+                        if (sound && mediaMuted) Text("Media volume is off", fontSize = 12.sp, color = t.secondary.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                     }
                 }
             }

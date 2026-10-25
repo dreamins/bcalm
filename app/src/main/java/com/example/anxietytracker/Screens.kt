@@ -719,7 +719,7 @@ private fun CalmSheet(e: Entry, editing: Boolean, sel: Set<String>, causes: List
             tool = null
             if (n != null) hideThen(onClose)
         }
-        Dialog(onDismissRequest = { finish(null) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Dialog(onDismissRequest = { finish(null) }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
             if (which == "breathe") BreatheScreen(onFinish = finish) else GroundScreen(onFinish = finish)
         }
     }
