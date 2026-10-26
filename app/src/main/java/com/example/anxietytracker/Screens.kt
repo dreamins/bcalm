@@ -28,6 +28,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -40,12 +41,15 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -62,7 +66,9 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -86,6 +92,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -844,33 +851,62 @@ fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, act
             }
         }
     }
+    // Sheet lists causes hidden from the grid when it opened (stable while toggling), A-Z.
+    val allSnap = remember(showAll) { ranked.map { it.name }.toSet() }
+    val hiddenSnap = remember(showAll) { allSnap - shown.toSet() }
     if (showAll) {
         val t = MaterialTheme.bcalm
+        var query by remember { mutableStateOf("") }
+        val uses = ranked.associate { it.name to it.uses }
+        val base = causes.filter { it in hiddenSnap || it !in allSnap }.sortedBy { it.lowercase() }
+        val showSearch = base.size > 10
+        val q = query.trim()
+        val rows = if (showSearch && q.isNotEmpty()) base.filter { it.contains(q, ignoreCase = true) } else base
+        val canAdd = showSearch && q.isNotEmpty() && causes.none { it.equals(q, ignoreCase = true) }
+        val listState = rememberLazyListState()
+        val focus = remember { FocusRequester() }
+        val kb = LocalSoftwareKeyboardController.current
+        val fm = LocalFocusManager.current
+        LaunchedEffect(showSearch) { if (showSearch) runCatching { focus.requestFocus() } }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.isScrollInProgress }.filter { it }.collect { kb?.hide(); fm.clearFocus() }
+        }
         ModalBottomSheet(onDismissRequest = { showAll = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-            LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                items(ranked, key = { it.name }) { rc ->
-                    val selected = rc.name in sel
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp)
-                        .clickable(role = Role.Checkbox) { vm.toggleCause(rc.name) }
-                        .padding(horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(rc.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) t.accent else t.ink)
-                        if (rc.uses > 0) Text("${rc.uses}×", style = MaterialTheme.typography.bodySmall,
-                            color = t.secondary, modifier = Modifier.padding(start = 8.dp))
-                        Box(Modifier.width(26.dp), contentAlignment = Alignment.CenterEnd) {
-                            if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
-                                modifier = Modifier.size(18.dp), tint = t.accent)
+            Column(Modifier.fillMaxWidth().imePadding()) {
+                if (showSearch) OutlinedTextField(value = query, onValueChange = { query = it.take(30) },
+                    singleLine = true, shape = SmallShape, placeholder = { Text("Search causes") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear")
+                    } },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).focusRequester(focus))
+                LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).padding(horizontal = 16.dp), state = listState) {
+                    items(rows, key = { it }) { name ->
+                        val selected = name in sel
+                        val n = uses[name] ?: 0
+                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                            .clickable(role = Role.Checkbox) { vm.toggleCause(name) }
+                            .padding(horizontal = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) t.accent else t.ink)
+                            if (n > 0) Text("$n×", style = MaterialTheme.typography.bodySmall,
+                                color = t.secondary, modifier = Modifier.padding(start = 8.dp))
+                            Box(Modifier.width(26.dp), contentAlignment = Alignment.CenterEnd) {
+                                if (selected) Icon(Icons.Filled.Check, contentDescription = "Selected",
+                                    modifier = Modifier.size(18.dp), tint = t.accent)
+                            }
                         }
+                        HorizontalDivider(color = t.innerDivider)
                     }
-                    HorizontalDivider(color = t.innerDivider)
-                }
-                item {
-                    TextButton(onClick = { adding = true }) { Text("Add cause…") }
-                    Spacer(Modifier.height(24.dp))
+                    item {
+                        if (canAdd) TextButton(onClick = { vm.addCause(q); query = "" }) { Text("Add \"$q\"") }
+                        else if (!showSearch || q.isEmpty()) TextButton(onClick = { adding = true }) { Text("Add cause…") }
+                        Spacer(Modifier.height(24.dp))
+                    }
                 }
             }
         }
