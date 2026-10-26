@@ -867,7 +867,6 @@ fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, act
         val focus = remember { FocusRequester() }
         val kb = LocalSoftwareKeyboardController.current
         val fm = LocalFocusManager.current
-        LaunchedEffect(showSearch) { if (showSearch) runCatching { focus.requestFocus() } }
         LaunchedEffect(listState) {
             snapshotFlow { listState.isScrollInProgress }.filter { it }.collect { kb?.hide(); fm.clearFocus() }
         }
@@ -881,6 +880,11 @@ fun CausesList(causes: List<String>, sel: Set<String>, entries: List<Entry>, act
                         Icon(Icons.Filled.Close, contentDescription = "Clear")
                     } },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).focusRequester(focus))
+                if (showSearch) LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    runCatching { focus.requestFocus() }
+                    kb?.show()
+                }
                 LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).padding(horizontal = 16.dp), state = listState) {
                     items(rows, key = { it }) { name ->
                         val selected = name in sel
