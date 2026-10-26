@@ -29,7 +29,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 - **History** grouped by day, with notable details only and swipe-to-delete (with Undo).
 - **Check for updates** in Settings, a manual button that compares your installed version with the latest release and links to the download. Nothing is checked unless you tap it.
 - **Light and dark theme** follow the system setting, in a classic, neutral look.
-- **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once. Sync is two-way: changes made to the file elsewhere are merged in on the next sync (at app start, on resume and after each change); the file wins for edited entries and calm cards, and deletions made elsewhere aren't applied.
+- **CSV export and import** (restore history after reinstalling), and **auto-sync to Google Drive** via a file you pick once ("New file…" creates one; "Use existing file…" points at an existing bcalm CSV and merges it in). Sync is two-way: changes made to the file elsewhere are merged in on the next sync (at app start, on resume and after each change); the file wins for edited entries and calm cards, and deletions made elsewhere aren't applied.
 
 ## Screenshots
 
@@ -65,3 +65,5 @@ All data stays on your device unless you export it or turn on sync to a file you
 The APK is written to `app/build/outputs/apk/debug/`. GitHub Actions ("Build APK") builds every push and publishes the `latest` release from `main`.
 
 To refresh the screenshots, run the **Screenshots** workflow from the Actions tab. It boots an emulator, seeds demo data, captures each tab and commits the images to `docs/screenshots/`.
+
+Tools that edit the synced file should update it in place (same file), not upload a replacement or delete and recreate it, or the phone loses the link and shows "Sync file missing or no access".

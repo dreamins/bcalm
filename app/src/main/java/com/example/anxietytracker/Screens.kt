@@ -1382,6 +1382,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) CsvSync.setTarget(ctx, uri)
     }
+    val existingPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) CsvSync.setExistingTarget(ctx, uri)
+    }
     val scope = rememberCoroutineScope()
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -1496,9 +1499,12 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         SettingsSection("Sync to Google Drive") {
             val target = syncUri
             if (target == null) {
-                Caption("Choose a file in Google Drive using the system picker. It is rewritten after every change.",
+                Caption("Pick a new file, or an existing bcalm CSV to merge it in. Changes are synced both ways.",
                     Modifier.padding(vertical = 8.dp))
-                TextButton(onClick = { picker.launch("bcalm.csv") }) { Text("Choose file…") }
+                Row {
+                    TextButton(onClick = { picker.launch("bcalm.csv") }) { Text("New file…") }
+                    TextButton(onClick = { existingPicker.launch(SYNC_MIMES) }) { Text("Use existing file…") }
+                }
             } else {
                 val name by produceState("selected file", target) {
                     value = withContext(Dispatchers.IO) { CsvSync.displayName(ctx, target) }
@@ -1512,10 +1518,14 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                         "Last sync: ${at.format(fmt)} — ${syncState.message}"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (syncState.message.startsWith("Failed")) cs.error else cs.onSurfaceVariant)
+                    color = if (syncState.message.startsWith("Failed") || syncState.message == CsvSync.MISSING_MSG) cs.error else cs.onSurfaceVariant)
                 Row {
                     TextButton(onClick = { CsvSync.enqueue(ctx) }) { Text("Sync now") }
                     TextButton(onClick = { CsvSync.stop(ctx) }) { Text("Stop syncing") }
+                }
+                Row {
+                    TextButton(onClick = { picker.launch("bcalm.csv") }) { Text("New file…") }
+                    TextButton(onClick = { existingPicker.launch(SYNC_MIMES) }) { Text("Use existing file…") }
                 }
             }
         }
@@ -1658,3 +1668,5 @@ private fun UpdateCheckRow(ctx: android.content.Context, installed: Long) {
         }
     }
 }
+
+private val SYNC_MIMES = arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream", "*/*")

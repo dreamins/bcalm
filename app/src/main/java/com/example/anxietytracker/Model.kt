@@ -200,6 +200,18 @@ object Csv {
         return if (encoded) dec(s) else s
     }
 
+    /** Strips one wrapping pair of double quotes, or a lone leading/trailing one left by quote-then-encode tools. */
+    private fun unquote(s: String): String {
+        var t = s.trim()
+        t = when {
+            t.length >= 2 && t.startsWith("\"") && t.endsWith("\"") -> t.substring(1, t.length - 1)
+            t.startsWith("\"") -> t.substring(1)
+            t.endsWith("\"") -> t.dropLast(1)
+            else -> t
+        }
+        return t.trim()
+    }
+
     /** Splits a '#' row on commas, honouring double quotes ("" = literal quote); returns (text, wasQuoted). */
     private fun splitHash(line: String): List<Pair<String, Boolean>> {
         val out = ArrayList<Pair<String, Boolean>>()
@@ -231,7 +243,7 @@ object Csv {
         for (line in text.removePrefix("\uFEFF").lines().map { it.trim() }) {
             if (!line.startsWith("#")) continue
             val f = splitHash(line)
-            fun v(i: Int) = f[i].let { (x, q) -> if (q) x else smartDec(x) }
+            fun v(i: Int) = f[i].let { (x, q) -> unquote(if (q) x else smartDec(x)) }
             when (f[0].first) {
                 "#card" -> if (f.size >= 4) {
                     val name = v(1).trim()

@@ -46,6 +46,20 @@ object CsvSync {
         enqueue(ctx)
     }
 
+    /** Points sync at an existing document; the first sync merges its content in (setSyncUri clears syncHash). */
+    fun setExistingTarget(ctx: Context, uri: Uri) {
+        var err: String? = null
+        try {
+            ctx.contentResolver.takePersistableUriPermission(uri, RW)
+        } catch (e: Exception) {
+            err = "Failed: could not keep write access to that file (${e.message ?: e.javaClass.simpleName})"
+        }
+        Store.setSyncUri(uri.toString())
+        if (err != null) Store.setSyncResult(err) else enqueue(ctx)
+    }
+
+    const val MISSING_MSG = "Sync file missing or no access — choose it again in Settings."
+
     fun stop(ctx: Context) {
         val s = Store.syncUri.value
         if (s != null) {
@@ -79,8 +93,12 @@ object CsvSync {
 
     /** Current bytes of the document, or null if missing/unreadable (permission loss is rethrown). */
     private fun read(cr: ContentResolver, uri: Uri): ByteArray? = try {
-        cr.openInputStream(uri)?.use { it.readBytes() }
+        (cr.openInputStream(uri) ?: throw FileNotFoundException("cannot open")).use { it.readBytes() }
     } catch (e: SecurityException) {
+        throw e
+    } catch (e: FileNotFoundException) {
+        throw e
+    } catch (e: IllegalArgumentException) {
         throw e
     } catch (e: Exception) {
         null
@@ -108,6 +126,8 @@ object CsvSync {
                 cr.openOutputStream(uri, "wt")
             } catch (e: SecurityException) {
                 throw e
+            } catch (e: IllegalArgumentException) {
+                throw e
             } catch (e: Exception) {
                 cr.openOutputStream(uri, "w")
             }
@@ -128,10 +148,13 @@ class CsvSyncWorker(ctx: Context, p: WorkerParameters) : Worker(ctx, p) {
             Store.setSyncResult(if (merged) "Synced (merged changes from file)" else "OK")
             Result.success()
         } catch (e: SecurityException) {
-            Store.setSyncResult("Failed: permission lost — choose the file again")
+            Store.setSyncResult(CsvSync.MISSING_MSG)
+            Result.success()
+        } catch (e: IllegalArgumentException) {
+            Store.setSyncResult(CsvSync.MISSING_MSG)
             Result.success()
         } catch (e: FileNotFoundException) {
-            Store.setSyncResult("Failed: file not found — choose the file again")
+            Store.setSyncResult(CsvSync.MISSING_MSG)
             Result.success()
         } catch (e: IOException) {
             Store.setSyncResult("Failed: ${e.message ?: "I/O error"} (will retry)")
