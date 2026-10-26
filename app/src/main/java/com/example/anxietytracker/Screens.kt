@@ -1019,24 +1019,24 @@ fun ChartScreen(vm: MainViewModel) {
             Text(sentence, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
             if (ins.count > 0) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile("Average", "%.1f".format(ins.avg), Modifier.weight(1f))
+                    StatTile("Average", "%.1f".format(if (view == 1) ins.wakeAvg else ins.avg), Modifier.weight(1f))
                     if (hard != null) StatTile(hard.label, "%.1f".format(hard.avg), Modifier.weight(1f))
-                    StatTile("Entries", "${ins.count}", Modifier.weight(1f))
+                    StatTile("Entries", "${if (view == 1) ins.wakeCount else ins.count}", Modifier.weight(1f))
                 }
             }
             SectionHeader(when (view) { 0 -> "Anxiety by hour of day"; 1 -> "Anxiety since waking"; else -> "Anxiety over time" })
             if (view == 0) {
                 HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp),
                     highlight = ins.hard?.let { it.start until it.start + it.width })
-                Caption("Hour of day, in local time where logged. Bars are the hourly average; dots are single entries.")
+                Caption("Hour of day, in local time where logged. Bars are the hourly average; red and green lines are the 90th and 10th percentile; dots are single entries.")
             } else if (view == 1) {
                 val wakeData = remember(data) { data.filter { it.hoursSinceWake != null } }
                 HourOfDayChart(wakeData, Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4,
                     ins.wakeHard?.let { it.start until it.start + it.width }) { "${it}h" }
-                Caption("Hours since waking. Needs a wake time on the entry. Bars are the hourly average; dots are single entries.")
+                Caption("Hours since waking, for the ${ins.wakeCount} entries with a wake time. Bars are the hourly average; red and green lines are the 90th and 10th percentile; dots are single entries.")
             } else {
                 TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
-                Caption("Date. Line is the daily average; dots are single entries.")
+                Caption("Date. Line is the daily average; red and green lines are the daily 90th and 10th percentile; dots are single entries.")
             }
         }
 
@@ -1180,6 +1180,8 @@ fun HourOfDayChart(
     val dot = t.secondary.copy(alpha = 0.45f)
     val bar = t.mutedBar
     val barHi = t.accent
+    val hiC = t.high
+    val loC = t.low
     val txt = t.secondary
     Canvas(modifier) {
         val l = 28.dp.toPx(); val b = 24.dp.toPx(); val top0 = 8.dp.toPx(); val r = 8.dp.toPx()
@@ -1218,6 +1220,17 @@ fun HourOfDayChart(
         data.forEach { e ->
             val ex = xOf(e) ?: return@forEach
             drawCircle(dot, 2.dp.toPx(), Offset(x(ex), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
+        }
+        val byHour = (lo until hi).map { hh -> data.filter { xOf(it)?.toInt() == hh }.map { it.anxiety!!.coerceIn(1, 10) } }
+        for ((p, c) in listOf(90.0 to hiC, 10.0 to loC)) {
+            val pts = byHour.map { v -> if (v.isEmpty()) null else percentile(v, p).toFloat() }
+            for (i in pts.indices) {
+                val v = pts[i] ?: continue
+                val o = Offset(x(lo + i + 0.5f), y(v))
+                val prev = pts.getOrNull(i - 1)
+                if (prev != null) drawLine(c, Offset(x(lo + i - 0.5f), y(prev)), o, 1.5.dp.toPx(), StrokeCap.Round)
+                if (prev == null && pts.getOrNull(i + 1) == null) drawCircle(c, 2.5.dp.toPx(), o)
+            }
         }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
@@ -1278,6 +1291,20 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
             drawPath(path, line, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         pts.forEach { drawCircle(line, 3.dp.toPx(), it) }
+        val dayVals = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
+            val xx = x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli())
+            val v = es.map { it.anxiety!!.coerceIn(1, 10) }
+            Triple(xx, percentile(v, 90.0).toFloat(), percentile(v, 10.0).toFloat())
+        }
+        for (hiLine in listOf(true, false)) {
+            val c = if (hiLine) tk.high else tk.low
+            val q = dayVals.map { Offset(it.first, y(if (hiLine) it.second else it.third)) }
+            if (q.size > 1) {
+                val path = Path().apply { moveTo(q[0].x, q[0].y); q.drop(1).forEach { lineTo(it.x, it.y) } }
+                drawPath(path, c, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            q.forEach { drawCircle(c, 2.dp.toPx(), it) }
+        }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
 }

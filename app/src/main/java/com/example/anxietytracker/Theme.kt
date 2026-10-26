@@ -29,6 +29,8 @@ class BcalmTokens(
     val mutedBar: Color,
     val joy: Color,
     val onAccent: Color,
+    val high: Color,
+    val low: Color,
 )
 
 private val LightTokens = BcalmTokens(
@@ -36,6 +38,7 @@ private val LightTokens = BcalmTokens(
     innerDivider = Color(0xFFEFEDE8), segmentedTrack = Color(0xFFEDEBE6), ink = Color(0xFF1C1C1E),
     secondary = Color(0xFF6B6B70), accent = Color(0xFF1F3A5F), accentTint = Color(0xFFEEF1F5),
     mutedBar = Color(0xFFC9D2DE), joy = Color(0xFF8A6A3B), onAccent = Color(0xFFFFFFFF),
+    high = Color(0xFFC25555), low = Color(0xFF4E9A53),
 )
 
 private val DarkTokens = BcalmTokens(
@@ -43,6 +46,7 @@ private val DarkTokens = BcalmTokens(
     innerDivider = Color(0xFF262628), segmentedTrack = Color(0xFF232325), ink = Color(0xFFF2F2F2),
     secondary = Color(0xFF9A9AA0), accent = Color(0xFF8FA9C9), accentTint = Color(0xFF1F2733),
     mutedBar = Color(0xFF343C48), joy = Color(0xFFC9A66B), onAccent = Color(0xFF0F1A2A),
+    high = Color(0xFFE07A7A), low = Color(0xFF7BC47F),
 )
 
 val LocalBcalm = staticCompositionLocalOf { LightTokens }

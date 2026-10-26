@@ -2,6 +2,16 @@ package com.example.anxietytracker
 
 import kotlin.math.abs
 
+/** Linear-interpolated percentile ([p] in 0..100) of [values]; 0.0 when empty. */
+fun percentile(values: List<Int>, p: Double): Double {
+    if (values.isEmpty()) return 0.0
+    val s = values.sorted()
+    val pos = (p / 100.0) * (s.size - 1)
+    val lo = pos.toInt()
+    val hi = minOf(lo + 1, s.size - 1)
+    return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+}
+
 /** One comparison row: [diff] is the mean anxiety difference (positive = higher anxiety). */
 data class DiffRow(val label: String, val n: Int, val diff: Double)
 
@@ -16,6 +26,8 @@ data class Insights(
     /** Structured form of the hardest window behind [sentence] / [wakeSentence]; null when none stands out. */
     val hard: HardWindow? = null,
     val wakeHard: HardWindow? = null,
+    val wakeCount: Int = 0,
+    val wakeAvg: Double = 0.0,
 )
 
 /** Hardest window found by [computeInsights]: [start] and [width] in hours, its [label] and mean anxiety [avg]. */
@@ -106,7 +118,7 @@ fun computeInsights(all: List<Entry>): Insights {
         cmp("Partner tense vs good", vals { it.partner == 2 }, vals { it.partner == 0 }),
         cmp("Poor sleep (≤2 vs ≥4)", vals { (it.sleep ?: 99) <= 2 }, vals { (it.sleep ?: 0) >= 4 }),
     )
-    return Insights(n, avg, sentence, wakeSentence, causes, other, factors, hard, wakeHard)
+    return Insights(n, avg, sentence, wakeSentence, causes, other, factors, hard, wakeHard, wakeData.size, wakeAvg)
 }
 
 /** One line of the night-sweats section: label on the left, plain-text value on the right. */
@@ -220,7 +232,7 @@ fun computeJoyInsights(all: List<Entry>): JoyInsights? {
 private fun HardWindow.text(overall: Double): String =
     "$label (avg ${"%.1f".format(avg)}, vs ${"%.1f".format(overall)} overall)."
 
-/** Best [width]-wide window (start in [starts], by [key]) with >= 3 entries and mean >= 0.3 above [avg], or null. */
+/** Best [width]-wide window (start in [starts], by [key]) with >= 5 entries and mean >= 0.3 above [avg], or null. */
 private fun hardestWindow(
     data: List<Entry>, avg: Double, width: Int, starts: IntRange, key: (Entry) -> Int, label: (Int) -> String,
 ): HardWindow? {
@@ -229,7 +241,7 @@ private fun hardestWindow(
     var bestN = 0
     for (s in starts) {
         val w = data.filter { key(it) >= s && key(it) < s + width }.map { it.anxiety!! }
-        if (w.size < 3) continue
+        if (w.size < 5) continue
         val m = w.average()
         val better = bestStart < 0 || m > bestAvg + 1e-9 ||
             (abs(m - bestAvg) <= 1e-9 && w.size > bestN)
