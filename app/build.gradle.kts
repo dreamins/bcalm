@@ -9,7 +9,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.bcalm"
+        applicationId = "io.github.dreamins.bcalm"
         minSdk = 26
         targetSdk = 36
         val run = System.getenv("GITHUB_RUN_NUMBER")

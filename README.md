@@ -10,6 +10,14 @@ A debug build is also available: [bcalm.apk](https://github.com/dreamins/bcalm/r
 
 Open it on your Android phone. You will need to allow "install unknown apps" for your browser (Android will prompt you). Android 8.0+.
 
+## Install from Google Play (internal testing)
+
+bcalm is being prepared for Google Play internal testing. Once you are added as a tester, open the opt-in link you are sent, accept the invitation, then install bcalm from the Play Store; updates then arrive through Play. The Play build is signed by Google Play, so it cannot be installed over the sideloaded APK.
+
+**Note on the applicationId change.** The app id is now `io.github.dreamins.bcalm` (it was `app.bcalm` in builds before this change; the Kotlin package is still `com.example.anxietytracker`). A sideloaded install of an older build is a separate app with its own data. To move your history: in the old app, sync (Settings, sync); then in the new app use Settings, sync, "Use existing file…" and pick the same CSV.
+
+Privacy policy: [docs/privacy.md](docs/privacy.md) (https://dreamins.github.io/bcalm/privacy.html once GitHub Pages is enabled).
+
 ## Features
 
 - **Tap to log.** Tap a number on the Log screen and the entry is saved at once, with everything carried over from last time. Any other change on the Log screen (caffeine, food, partner, causes, Today fields, joy) also logs an entry right away, with an Undo bar. If no anxiety number was tapped, the entry is saved without an anxiety level (it never copies the previous one).
