@@ -20,8 +20,17 @@ class BaselineFn(private val xs: DoubleArray, private val ys: DoubleArray) {
     }
 }
 
-/** One profile slot: [mean] of the per-day means, [p10]/[p90] across days, mean [base]line there, number of [days]. */
-class ProfilePt(val mean: Double, val p10: Double, val p90: Double, val base: Double, val days: Int)
+/** One profile slot: [mean] of the per-day means, mean [base]line there, number of [days]. */
+class ProfilePt(val mean: Double, val base: Double, val days: Int)
+
+/** One hour slot of the hard-moment strip: [cover] days with a grid point in it, [above] of them above 5 at some point. */
+class HardSlot(val cover: Int, val above: Int)
+
+/**
+ * Hard-moment timing over [totalDays] days: [start] of the window (3 h time of day / 2 h since waking) with the most
+ * distinct days above 5 ([k], ties earlier) out of [n] days covering it; [maxHour] = most days above 5 in a single slot.
+ */
+class HardBest(val totalDays: Int, val start: Int, val k: Int, val n: Int, val maxHour: Int)
 
 /** Best window of a profile: first slot [start] and its [mean]. */
 class CurveWindow(val start: Int, val mean: Double)
@@ -51,6 +60,11 @@ class CurveModel(
     val hoursAbove5: Map<LocalDate, Double>,
     val hardest: CurveWindow?,
     val wakeHardest: CurveWindow?,
+    val wakes: Map<LocalDate, Int> = emptyMap(),
+    val hardShare: List<HardSlot?> = emptyList(),
+    val wakeHardShare: List<HardSlot?> = emptyList(),
+    val hardBest: HardBest? = null,
+    val wakeHardBest: HardBest? = null,
     val patterns: CurvePatterns = CurvePatterns(emptyList(), 0, emptyList()),
 ) {
     /** Mean of each day's curve grid values. */
@@ -107,10 +121,40 @@ private fun profileOf(
     return List(n) { k ->
         val v = vals[k]
         if (v.size < 3) null else {
-            val s = v.sorted()
-            ProfilePt(v.average(), pctD(s, 10.0), pctD(s, 90.0), bases[k].average(), v.size)
+            ProfilePt(v.average(), bases[k].average(), v.size)
         }
     }
+}
+
+/** Per-slot hard shares and the best window of [width] slots (see [HardBest]); null with no covering days. */
+private fun hardOf(n: Int, width: Int, days: Map<LocalDate, List<Pair<Int, Double>>>, wakes: Map<LocalDate, Int>, byWake: Boolean): Pair<List<HardSlot?>, HardBest?> {
+    val covers = ArrayList<BooleanArray>()
+    val aboves = ArrayList<BooleanArray>()
+    for ((d, pts) in days) {
+        val wake = if (byWake) (wakes[d] ?: continue) else 0
+        val c = BooleanArray(n)
+        val a = BooleanArray(n)
+        for ((m, v) in pts) {
+            if (byWake && m < wake) continue
+            val k = if (byWake) (m - wake) / 60 else m / 60
+            if (k < 0 || k >= n) continue
+            c[k] = true
+            if (v > 5.0) a[k] = true
+        }
+        covers += c
+        aboves += a
+    }
+    if (covers.isEmpty()) return List<HardSlot?>(n) { null } to null
+    val slots = List<HardSlot?>(n) { k ->
+        val cv = covers.count { it[k] }
+        if (cv == 0) null else HardSlot(cv, aboves.count { it[k] })
+    }
+    var bs = 0; var bk = -1; var bn = 0
+    for (s in 0..n - width) {
+        val k = aboves.count { a -> (s until s + width).any { a[it] } }
+        if (k > bk) { bk = k; bs = s; bn = covers.count { c -> (s until s + width).any { c[it] } } }
+    }
+    return slots to HardBest(covers.size, bs, bk, bn, slots.maxOf { it?.above ?: 0 })
 }
 
 /** Best [width]-slot window whose mean is >= overall profile mean + 0.5; null when none. */
@@ -273,8 +317,11 @@ fun buildCurve(entries: List<Entry>, prompts: List<PromptRec> = emptyList()): Cu
     }
     val hourP = profileOf(24, days, wakes, base, false)
     val wakeP = profileOf(20, days, wakes, base, true)
+    val (hs, hb) = hardOf(24, 3, days, wakes, false)
+    val (ws, wb) = hardOf(20, 2, days, wakes, true)
     return CurveModel(base, half, nFits, fromCheckins, days, hourP, wakeP, above,
-        hardestOf(hourP, 3), hardestOf(wakeP, 2), curvePatterns(ratedByDay, gpts, entries))
+        hardestOf(hourP, 3), hardestOf(wakeP, 2), wakes, hs, ws, hb, wb,
+        curvePatterns(ratedByDay, gpts, entries))
 }
 
 /** Causes and factors read off the curve grid (see [buildCurve]); each day counts once, no rating is used directly. */

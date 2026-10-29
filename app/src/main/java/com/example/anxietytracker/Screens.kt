@@ -1139,20 +1139,32 @@ fun ChartScreen(vm: MainViewModel) {
         }
 
         SectionCard(padding = PaddingValues(horizontal = 16.dp, vertical = 18.dp), spacing = 14.dp) {
-            val cw = if (view == 1) curve.wakeHardest else curve.hardest
-            val cLabel = cw?.let { if (view == 1) "${it.start}–${it.start + 2} h after you wake up" else windowLabel(it.start) }
-            val sentenceText = if (showModeled) {
-                if (cLabel != null) "Your anxiety tends to run highest $cLabel."
+            val hb = if (view == 1) curve.wakeHardBest else curve.hardBest
+            val modTab = showModeled && view != 2
+            val hbDays = hb?.totalDays ?: 0
+            val cLabel = if (modTab && hb != null && hbDays >= 5 && hb.k >= 3 && hb.n > 0 && hb.k.toDouble() / hb.n >= 0.25)
+                (if (view == 1) "${hb.start}–${hb.start + 2} h after waking" else windowLabel(hb.start)) else null
+            val sentenceText = if (modTab) {
+                if (hbDays < 5) "A few more days needed to see when hard moments happen."
+                else if (cLabel != null) "Hard moments most often hit $cLabel (${hb!!.k} of ${hb.n} days)."
+                else "Hard moments don't stick to a time ${if (view == 1) "since waking" else "of day"}: no hour was above 5 on more than ${hb!!.maxHour} of $hbDays days."
+            } else if (showModeled) {
+                val ow = if (view == 1) curve.wakeHardest else curve.hardest
+                val ol = ow?.let { if (view == 1) "${it.start}–${it.start + 2} h after you wake up" else windowLabel(it.start) }
+                if (ol != null) "Your anxiety tends to run highest $ol."
                 else if (view == 1) "No time since waking stands out in the modeled curve yet."
                 else "No time of day stands out in the modeled curve yet."
             } else if (view == 1) ins.wakeSentence else ins.sentence
             val hard = if (view == 1) ins.wakeHard else ins.hard
-            val hlLabel = if (showModeled) cLabel else hard?.label
+            val hlLabel = if (modTab) cLabel else if (showModeled) {
+                val ow = if (view == 1) curve.wakeHardest else curve.hardest
+                ow?.let { if (view == 1) "${it.start}–${it.start + 2} h after you wake up" else windowLabel(it.start) }
+            } else hard?.label
             val cut = if (hlLabel != null) sentenceText.indexOf(hlLabel) else -1
             val sentence = if (hlLabel != null && cut >= 0) buildAnnotatedString {
                 append(sentenceText.substring(0, cut))
                 withStyle(SpanStyle(color = t.accent)) { append(hlLabel) }
-                append(".")
+                append(if (modTab) sentenceText.substring(cut + hlLabel.length) else ".")
             } else AnnotatedString(sentenceText)
             Text(sentence, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
             if (showModeled) {
@@ -1164,7 +1176,7 @@ fun ChartScreen(vm: MainViewModel) {
                     }
                 } else if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
-                    if (view != 2 && cw != null && cLabel != null) StatTile(cLabel, "%.1f".format(cw.mean), Modifier.weight(1f))
+                    if (view != 2 && cLabel != null) StatTile(cLabel, "${hb!!.k}/${hb.n} days", Modifier.weight(1f))
                     StatTile("Hours > 5 / day", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f))
                 }
             } else if (ins.count > 0) {
@@ -1176,12 +1188,27 @@ fun ChartScreen(vm: MainViewModel) {
             }
             SectionHeader(when (view) { 0 -> "Anxiety by hour of day"; 1 -> "Anxiety since waking"; else -> "Anxiety over time" })
             if (showModeled && view == 0) {
-                CurveChart(rangeRated, curve.hourProfile, Modifier.fillMaxWidth().height(220.dp),
+                val lines = remember(curve) {
+                    curve.days.map { (d, pts) -> CurveLine(pts.map { it.first / 60f to it.second.toFloat() }, (curve.hoursAbove5[d] ?: 0.0) >= 1.0) }
+                }
+                val wd = rangeRated
+                CurveChart(wd, curve.hourProfile, Modifier.fillMaxWidth().height(220.dp), lines = lines,
                     highlight = curve.hardest?.let { it.start until it.start + 3 })
+                val (lo, hi) = curveAxis(wd, curve.hourProfile, { it.hourOfDay }, null, null)
+                HardStrip(curve.hardShare, lo, hi, Modifier.fillMaxWidth().height(28.dp))
             } else if (showModeled && view == 1) {
-                CurveChart(rangeRated.filter { it.hoursSinceWake != null }, curve.wakeProfile,
+                val lines = remember(curve) {
+                    curve.days.mapNotNull { (d, pts) ->
+                        val wk = curve.wakes[d] ?: return@mapNotNull null
+                        CurveLine(pts.filter { it.first >= wk && (it.first - wk) / 60f < 20f }.map { (it.first - wk) / 60f to it.second.toFloat() },
+                            (curve.hoursAbove5[d] ?: 0.0) >= 1.0)
+                    }
+                }
+                val wd = rangeRated.filter { it.hoursSinceWake != null }
+                CurveChart(wd, curve.wakeProfile,
                     Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4,
-                    curve.wakeHardest?.let { it.start until it.start + 2 }) { "${it}h" }
+                    curve.wakeHardest?.let { it.start until it.start + 2 }, lines = lines) { "${it}h" }
+                HardStrip(curve.wakeHardShare, 0, 20, Modifier.fillMaxWidth().height(28.dp))
             } else if (view == 0) {
                 HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp),
                     highlight = ins.hard?.let { it.start until it.start + it.width })
@@ -1204,7 +1231,8 @@ fun ChartScreen(vm: MainViewModel) {
                 Caption("Modeled hours spent above 5 each day.")
             }
             if (showModeled) {
-                Caption("Baseline %.1f. ".format(curve.baseline.at(720.0)) + "Modeled: between ratings, anxiety fades back toward your baseline (half-life %.1f h, %s). Band shows how much days differ; dots are your ratings.".format(
+                Caption("Baseline %.1f. ".format(curve.baseline.at(720.0)) + (if (view != 2) "Faint lines are your individual days (red = days with an hour or more above 5); the bold line is the average day; dots are your ratings. Bars below: how often each hour was above 5. Between ratings, anxiety fades toward baseline (half-life %.1f h, %s)."
+                    else "Modeled: between ratings, anxiety fades back toward your baseline (half-life %.1f h, %s). Band shows how much days differ; dots are your ratings.").format(
                     curve.halfLife, if (curve.halfLifeFits > 0) "measured from ${curve.halfLifeFits} fades" else "estimated") +
                     if (curve.baselineFromCheckins) ""
                     else " Baseline estimated from your logs — likely too high until you have a few check-ins.")
@@ -1556,15 +1584,27 @@ fun HourOfDayChart(
     }
 }
 
+/** One day's modeled curve for [CurveChart]: (x, value) points on the chart's x axis; [bad] = an hour or more above 5. */
+class CurveLine(val pts: List<Pair<Float, Float>>, val bad: Boolean)
+
+/** Axis range (lo, hi) of [CurveChart], shared with [HardStrip] so columns line up. */
+fun curveAxis(data: List<Entry>, profile: List<ProfilePt?>, xOf: (Entry) -> Float?, fixedLo: Int?, fixedHi: Int?): Pair<Int, Int> {
+    val hours = data.mapNotNull { xOf(it)?.toInt() } + profile.indices.filter { profile[it] != null }
+    val lo = fixedLo ?: ((minOf(6, hours.minOrNull() ?: 6) / 3) * 3)
+    val hi = fixedHi ?: minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
+    return lo to hi
+}
+
 /**
- * Modeled profile: p10..p90 band (accent, faint), mean line, dashed baseline, and the ratings as dots (check-ins
- * brighter). [profile] slot i is x = i (+0.5 for its centre); null slots break the line and band.
+ * Modeled profile: every day's curve as a faint line (days with an hour or more above 5 in the `high` colour, on top),
+ * the mean line, dashed baseline, and the ratings as dots (check-ins brighter). [profile] slot i is x = i (+0.5 for
+ * its centre); null slots break the mean line.
  */
 @Composable
 fun CurveChart(
     data: List<Entry>, profile: List<ProfilePt?>, modifier: Modifier,
     xOf: (Entry) -> Float? = { it.hourOfDay }, fixedLo: Int? = null, fixedHi: Int? = null,
-    labelStep: Int = 3, highlight: IntRange? = null, label: (Int) -> String = { "$it" },
+    labelStep: Int = 3, highlight: IntRange? = null, lines: List<CurveLine> = emptyList(), label: (Int) -> String = { "$it" },
 ) {
     val measurer = rememberTextMeasurer()
     val t = MaterialTheme.bcalm
@@ -1577,9 +1617,7 @@ fun CurveChart(
     Canvas(modifier) {
         val l = 28.dp.toPx(); val b = 24.dp.toPx(); val top0 = 8.dp.toPx(); val r = 8.dp.toPx()
         val w = size.width - l - r; val h = size.height - top0 - b
-        val hours = data.mapNotNull { xOf(it)?.toInt() } + profile.indices.filter { profile[it] != null }
-        val lo = fixedLo ?: ((minOf(6, hours.minOrNull() ?: 6) / 3) * 3)
-        val hi = fixedHi ?: minOf(24, ((maxOf(21, (hours.maxOrNull() ?: 21) + 1) + 2) / 3) * 3)
+        val (lo, hi) = curveAxis(data, profile, xOf, fixedLo, fixedHi)
         val span = (hi - lo).toFloat()
         fun x(hr: Float) = l + w * (hr - lo) / span
         fun y(a: Float) = top0 + h * (1 - a / 10f)   // baseline = 0, top = 10
@@ -1598,6 +1636,19 @@ fun CurveChart(
         val slot = w / span
         if (highlight != null) for (hh in highlight) if (hh >= lo && hh < hi)
             drawRect(accent.copy(alpha = 0.06f), Offset(x(hh.toFloat()), top0), Size(slot, h))
+        for (bad in listOf(false, true)) {
+            val c = if (bad) t.high.copy(alpha = 0.35f) else t.secondary.copy(alpha = 0.18f)
+            for (ln in lines) {
+                if (ln.bad != bad) continue
+                val p = ln.pts.filter { it.first >= lo && it.first <= hi }
+                if (p.size < 2) continue
+                val path = Path().apply {
+                    moveTo(x(p[0].first), y(p[0].second))
+                    for (i in 1 until p.size) lineTo(x(p[i].first), y(p[i].second))
+                }
+                drawPath(path, c, style = Stroke(1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+        }
         // Contiguous runs of non-null slots inside the axis.
         val runs = ArrayList<List<Int>>()
         var cur = ArrayList<Int>()
@@ -1610,13 +1661,6 @@ fun CurveChart(
             val pts = run.map { profile[it]!! }
             val xs = run.map { x(it + 0.5f) }
             if (run.size > 1) {
-                val band = Path().apply {
-                    moveTo(xs[0], y(pts[0].p90.toFloat()))
-                    for (i in 1 until run.size) lineTo(xs[i], y(pts[i].p90.toFloat()))
-                    for (i in run.indices.reversed()) lineTo(xs[i], y(pts[i].p10.toFloat()))
-                    close()
-                }
-                drawPath(band, accent.copy(alpha = 0.15f))
                 val bl = Path().apply {
                     moveTo(xs[0], y(pts[0].base.toFloat()))
                     for (i in 1 until run.size) lineTo(xs[i], y(pts[i].base.toFloat()))
@@ -1629,10 +1673,7 @@ fun CurveChart(
                 }
                 drawPath(line, accent, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             } else {
-                val p = pts[0]
-                drawRect(accent.copy(alpha = 0.15f), Offset(xs[0] - slot * 0.35f, y(p.p90.toFloat())),
-                    Size(slot * 0.7f, maxOf(1f, y(p.p10.toFloat()) - y(p.p90.toFloat()))))
-                drawCircle(accent, 2.5.dp.toPx(), Offset(xs[0], y(p.mean.toFloat())))
+                drawCircle(accent, 2.5.dp.toPx(), Offset(xs[0], y(pts[0].mean.toFloat())))
             }
         }
         data.forEach { e ->
@@ -1640,6 +1681,36 @@ fun CurveChart(
             drawCircle(if (e.isPrompted()) dotP else dot, 2.dp.toPx(), Offset(x(ex), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
+    }
+}
+
+/**
+ * Strip under [CurveChart] (same margins, axis [lo]..[hi]): per slot a bar in `high` whose height is the share of
+ * covering days that were above 5 in it; full height = 50% or the largest share, whichever is larger.
+ */
+@Composable
+fun HardStrip(slots: List<HardSlot?>, lo: Int, hi: Int, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val t = MaterialTheme.bcalm
+    val txt = t.secondary
+    Canvas(modifier) {
+        val l = 28.dp.toPx(); val r = 8.dp.toPx(); val top0 = 2.dp.toPx(); val bot = 2.dp.toPx()
+        val w = size.width - l - r; val h = size.height - top0 - bot
+        val slotW = w / (hi - lo)
+        val share = slots.map { if (it == null || it.cover == 0) 0.0 else it.above.toDouble() / it.cover }
+        val full = maxOf(0.5, share.maxOrNull() ?: 0.0)
+        val m = measurer.measure("> 5", TextStyle(color = txt, fontSize = 10.sp))
+        drawText(m, topLeft = Offset(l - m.size.width - 6.dp.toPx(), top0 + h - m.size.height))
+        val bw = slotW * 0.7f
+        for (i in lo until hi) {
+            val s = slots.getOrNull(i) ?: continue
+            val f = share[i]
+            if (s.cover == 0 || f <= 0.0) continue
+            val bh = maxOf(1.dp.toPx(), (h * f / full).toFloat())
+            drawRoundRect(t.high, Offset(l + slotW * (i - lo + 0.5f) - bw / 2f, top0 + h - bh), Size(bw, bh),
+                CornerRadius(1.dp.toPx(), 1.dp.toPx()))
+        }
+        drawLine(t.cardBorder, Offset(l, top0 + h), Offset(l + w, top0 + h), 1.dp.toPx())
     }
 }
 
