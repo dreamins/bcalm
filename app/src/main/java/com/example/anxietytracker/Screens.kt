@@ -1390,7 +1390,7 @@ private fun RecoveryCard(r: Recovery, half: Double, fits: Int, answered: Int, to
             return@SectionCard
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Recovery", r.medianMin?.let { fmtHours(it) } ?: "—", Modifier.weight(1f), "back near baseline")
+            StatTile("Recovery", r.medianMin?.let { fmtHours(it) } ?: "—", Modifier.weight(1f), "to baseline")
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 StatTile("Half-life", "%.1f h".format(half), Modifier.fillMaxWidth(), "fade")
                 Caption(if (fits > 0) "measured" else "estimated", Modifier.padding(start = 4.dp))
