@@ -39,7 +39,12 @@ class MainActivity : ComponentActivity() {
         Store.init(this)
         Prompts.migrate(this)
         if (savedInstanceState == null) takePrompt(intent)
+        val ver = appVersion()
+        val seen = Store.introSeenVersion
+        // opened from a check-in notification: skip the intro this time, don't mark it seen
+        val introOn = promptId == null && seen < ver
         setContent {
+            var showIntro by rememberSaveable { mutableStateOf(introOn) }
             val dark = isSystemInDarkTheme()
             val ctx = LocalContext.current
             BcalmTheme(dark) {
@@ -53,9 +58,15 @@ class MainActivity : ComponentActivity() {
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onAppStopped() }
                 AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0),
                     promptId = promptId, onPromptDone = { promptId = null })
+                if (showIntro) IntroScreen(update = seen > 0, onDone = { Store.introSeenVersion = ver; showIntro = false })
             }
         }
     }
+
+    private fun appVersion(): Long = try {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    } catch (e: Exception) { 1L }
 
     private fun exportCsv() {
         val dir = File(cacheDir, "exports").apply { mkdirs() }

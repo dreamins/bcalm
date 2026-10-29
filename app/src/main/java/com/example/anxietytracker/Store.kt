@@ -91,6 +91,9 @@ object Store {
     var promptsMigrated: Boolean
         get() = prefs.getBoolean("promptsMigrated", false)
         set(v) { prefs.edit().putBoolean("promptsMigrated", v).apply() }
+    var introSeenVersion: Long
+        get() = prefs.getLong("introSeenVersion", 0L)
+        set(v) { prefs.edit().putLong("introSeenVersion", v).apply() }
     fun promptWindow(w: Int): Pair<Int, Int> =
         prefs.getInt("promptStart$w", Prompts.DEFAULTS[w].first) to prefs.getInt("promptEnd$w", Prompts.DEFAULTS[w].second)
     fun setPromptWindow(w: Int, start: Int, end: Int) {
