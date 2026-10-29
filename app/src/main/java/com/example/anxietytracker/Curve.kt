@@ -6,7 +6,8 @@ import kotlin.math.pow
 
 /** Grid step of the day curves, in minutes. */
 const val CURVE_STEP = 15
-const val DEFAULT_HALF_LIFE = 1.8
+/** Fade half-life (hours) used until >= 5 fades are measured. */
+const val DEFAULT_HALF_LIFE_H = 3.5
 
 /** Piecewise-linear baseline over minute of day (flat beyond the first/last point); one point = constant. */
 class BaselineFn(private val xs: DoubleArray, private val ys: DoubleArray) {
@@ -207,7 +208,7 @@ fun buildCurve(entries: List<Entry>, prompts: List<PromptRec> = emptyList()): Cu
     val rated = entries.filter { it.anxiety != null }.sortedBy { it.ts }
     val (base, fromCheckins) = baselineOf(rated)
     val fits = fadeFits(rated, base).map { it.second }
-    val half = if (fits.size >= 5) median(fits).coerceIn(0.5, 6.0) else DEFAULT_HALF_LIFE
+    val half = if (fits.size >= 5) median(fits).coerceIn(0.5, 6.0) else DEFAULT_HALF_LIFE_H
     val nFits = if (fits.size >= 5) fits.size else 0
 
     val ratedByDay = rated.groupBy { it.dateTime.toLocalDate() }
