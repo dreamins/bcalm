@@ -41,7 +41,19 @@ class CurveModel(
     val hoursAbove5: Map<LocalDate, Double>,
     val hardest: CurveWindow?,
     val wakeHardest: CurveWindow?,
-)
+) {
+    /** Mean of each day's curve grid values. */
+    val dailyMean: Map<LocalDate, Double> = days.mapValues { (_, pts) -> pts.map { it.second }.average() }
+
+    /** Time-weighted mean anxiety: mean over days of [dailyMean] (each day equally); null with no days. */
+    val timeWeightedMean: Double? = if (dailyMean.isEmpty()) null else dailyMean.values.average()
+
+    /** Per day (mean, p90, p10) of the curve grid values. */
+    val dailyBand: Map<LocalDate, Triple<Double, Double, Double>> = days.mapValues { (d, pts) ->
+        val s = pts.map { it.second }.sorted()
+        Triple(dailyMean.getValue(d), pctD(s, 90.0), pctD(s, 10.0))
+    }
+}
 
 fun Entry.minuteOfDay(): Int = dateTime.let { it.hour * 60 + it.minute }
 

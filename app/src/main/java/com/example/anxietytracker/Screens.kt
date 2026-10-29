@@ -1014,12 +1014,13 @@ private fun RangeTrack(labels: List<String>, selected: Int, onPick: (Int) -> Uni
 }
 
 @Composable
-private fun StatTile(label: String, value: String, modifier: Modifier) {
+private fun StatTile(label: String, value: String, modifier: Modifier, sub: String? = null) {
     val t = MaterialTheme.bcalm
     Column(modifier.clip(CellShape).background(t.background).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, fontSize = 12.sp, color = t.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        if (sub != null) Text(sub, fontSize = 10.sp, color = t.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -1046,7 +1047,7 @@ fun ChartScreen(vm: MainViewModel) {
     val curve = remember(all, range) { buildCurve(all.filter { it.ts >= cutoff }) }
     val recovery = remember(all, range) { computeRecovery(all.filter { it.ts >= cutoff }, curve) }
     val rangeRated = remember(all, range) { all.filter { it.anxiety != null && it.ts >= cutoff } }
-    val showModeled = modeled && view != 2
+    val showModeled = modeled
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween,
@@ -1058,7 +1059,7 @@ fun ChartScreen(vm: MainViewModel) {
             allowClear = false) {
             if (it != null) { view = it; Store.chartView = it }
         }
-        if (view != 2) Segmented(listOf("Modeled", "Logged"), if (modeled) 0 else 1, Modifier.fillMaxWidth(),
+        Segmented(listOf("Modeled", "Logged"), if (modeled) 0 else 1, Modifier.fillMaxWidth(),
             height = 32.dp, allowClear = false, textSize = 13) {
             if (it != null) { modeled = it == 0; Store.chartModeled = modeled }
         }
@@ -1082,13 +1083,14 @@ fun ChartScreen(vm: MainViewModel) {
             Text(sentence, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
             if (showModeled) {
                 if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
                     StatTile("Baseline", "%.1f".format(curve.baseline.at(720.0)), Modifier.weight(1f))
-                    if (cw != null && cLabel != null) StatTile(cLabel, "%.1f".format(cw.mean), Modifier.weight(1f))
+                    if (view != 2 && cw != null && cLabel != null) StatTile(cLabel, "%.1f".format(cw.mean), Modifier.weight(1f))
                     StatTile("Hours > 5 / day", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f))
                 }
             } else if (ins.count > 0) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile("Average", "%.1f".format(if (view == 1) ins.wakeAvg else ins.avg), Modifier.weight(1f))
+                    StatTile("Avg of logs", "%.1f".format(if (view == 1) ins.wakeAvg else ins.avg), Modifier.weight(1f))
                     if (hard != null) StatTile(hard.label, "%.1f".format(hard.avg), Modifier.weight(1f))
                     StatTile("Entries", "${if (view == 1) ins.wakeCount else ins.count}", Modifier.weight(1f))
                 }
@@ -1104,15 +1106,18 @@ fun ChartScreen(vm: MainViewModel) {
             } else if (view == 0) {
                 HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp),
                     highlight = ins.hard?.let { it.start until it.start + it.width })
-                Caption("Hour of day, in local time where logged. Bars are the hourly average; red and green lines are the 90th and 10th percentile; dots are single entries.")
+                Caption("Hour of day, in local time where logged. Bars are the average of logged moments in each hour; red and green lines are the 90th and 10th percentile; dots are single entries.")
             } else if (view == 1) {
                 val wakeData = remember(data) { data.filter { it.hoursSinceWake != null } }
                 HourOfDayChart(wakeData, Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4,
                     ins.wakeHard?.let { it.start until it.start + it.width }) { "${it}h" }
-                Caption("Hours since waking, for the ${ins.wakeCount} entries with a wake time. Bars are the hourly average; red and green lines are the 90th and 10th percentile; dots are single entries.")
+                Caption("Hours since waking, for the ${ins.wakeCount} entries with a wake time. Bars are the average of logged moments in each hour; red and green lines are the 90th and 10th percentile; dots are single entries.")
+            } else if (showModeled) {
+                TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp), curve.dailyBand)
+                Caption("Date. Line is the time-weighted daily level from the modeled curve; red and green are the day's 90th and 10th percentile; dots are your ratings.")
             } else {
                 TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
-                Caption("Date. Line is the daily average; red and green lines are the daily 90th and 10th percentile; dots are single entries.")
+                Caption("Date. Line is the average of logged moments; red and green lines are the daily 90th and 10th percentile; dots are single entries.")
             }
             if (view == 2) {
                 SectionHeader("Hours above 5 per day")
@@ -1593,7 +1598,7 @@ fun HoursAboveChart(hours: Map<LocalDate, Double>, data: List<Entry>, range: Int
 
 /** Daily-average line (accent) over faint dots for single entries, on a date axis. */
 @Composable
-fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
+fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier, band: Map<LocalDate, Triple<Double, Double, Double>>? = null) {
     val measurer = rememberTextMeasurer()
     val tk = MaterialTheme.bcalm
     val grid = tk.innerDivider
@@ -1637,7 +1642,9 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
         data.forEach { e ->
             drawCircle(dot, 2.dp.toPx(), Offset(x(e.dateTime.atZone(zone).toInstant().toEpochMilli()), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
-        val pts = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
+        val pts = if (band != null) band.toSortedMap().map { (day, b) ->
+            Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), y(b.first.toFloat()))
+        } else data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()),
                 y(es.map { it.anxiety!!.coerceIn(1, 10) }.average().toFloat()))
         }
@@ -1646,7 +1653,9 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier) {
             drawPath(path, line, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         pts.forEach { drawCircle(line, 3.dp.toPx(), it) }
-        val dayVals = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
+        val dayVals = if (band != null) band.toSortedMap().map { (day, b) ->
+            Triple(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), b.second.toFloat(), b.third.toFloat())
+        } else data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             val xx = x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli())
             val v = es.map { it.anxiety!!.coerceIn(1, 10) }
             Triple(xx, percentile(v, 90.0).toFloat(), percentile(v, 10.0).toFloat())
