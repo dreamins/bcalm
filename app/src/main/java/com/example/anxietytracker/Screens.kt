@@ -1193,7 +1193,7 @@ fun ChartScreen(vm: MainViewModel) {
                 }
                 val wd = rangeRated
                 CurveChart(wd, curve.hourProfile, Modifier.fillMaxWidth().height(220.dp), lines = lines,
-                    highlight = curve.hardest?.let { it.start until it.start + 3 })
+                    highlight = if (cLabel != null) hb!!.start.let { it until it + 3 } else null)
                 val (lo, hi) = curveAxis(wd, curve.hourProfile, { it.hourOfDay }, null, null)
                 HardStrip(curve.hardShare, lo, hi, Modifier.fillMaxWidth().height(28.dp))
             } else if (showModeled && view == 1) {
@@ -1207,7 +1207,7 @@ fun ChartScreen(vm: MainViewModel) {
                 val wd = rangeRated.filter { it.hoursSinceWake != null }
                 CurveChart(wd, curve.wakeProfile,
                     Modifier.fillMaxWidth().height(220.dp), { it.hoursSinceWake }, 0, 20, 4,
-                    curve.wakeHardest?.let { it.start until it.start + 2 }, lines = lines) { "${it}h" }
+                    if (cLabel != null) hb!!.start.let { it until it + 2 } else null, lines = lines) { "${it}h" }
                 HardStrip(curve.wakeHardShare, 0, 20, Modifier.fillMaxWidth().height(28.dp))
             } else if (view == 0) {
                 HourOfDayChart(data, Modifier.fillMaxWidth().height(220.dp),

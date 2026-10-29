@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Generate demo data (entries.txt + draft.xml) in the app's on-disk formats.
+"""Generate anonymous demo data in the app's on-disk formats (mirrors Store.kt).
 
 usage: seed_demo.py OUTDIR TZ_OFFSET_MINUTES
-Formats mirror Store.kt: entries are '|' joined lines
-ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|alcohol|cannabis|offsetMin|joy
-and prefs live in shared_prefs/draft.xml.
+Writes OUTDIR/entries.txt, OUTDIR/prompts.txt and OUTDIR/draft.xml (SharedPreferences "draft").
+entries.txt lines ('|' joined):
+  ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|
+  alcohol|cannabis|offsetMin|joy|after|tools(;)|source|promptId
+prompts.txt lines: id|scheduledTs|window|status|answeredTs
+Three weeks: manual entries skewed to upset moments (4 bad days), random check-ins (~80% answered, mostly 1-3),
+follow-ups that show spikes fading, a couple of recalled entries, wake times, some joy values, tools on some spikes.
 """
+import datetime
 import os
 import random
 import sys
@@ -13,94 +18,182 @@ import time
 
 out = sys.argv[1]
 tz = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-random.seed(7)
+random.seed(11)
 
+DAYS = 21
+BAD_BACK = {17, 12, 7, 3}                    # bad days: several 7-8 peaks
 now_ms = int(time.time() * 1000)
-local_now = now_ms + tz * 60000
-today = local_now // 86400000          # epoch day on the device
-causes_pool = ["Work", "Deadline", "News/phone", "Money", "Social", "Conflict", "Health worry"]
+today = (now_ms + tz * 60000) // 86400000    # epoch day on the device
+CUTOFF = now_ms - 90 * 60000                 # nothing in the last 90 min (no open calm card / pending noise)
+WINDOWS = [(9 * 60, 11 * 60), (14 * 60, 16 * 60), (19 * 60, 21 * 60)]   # Prompts.DEFAULTS
+FOLLOW_MIN = [30, 90, 240]
+FOLLOWUP_WINDOW = 10
+
+UPSET = ["Work deadline", "Conflict at home", "Rumination", "Money worry", "News/phone", "No clear reason"]
+GOOD = ["Walk", "Friend call", "Good sleep"]
+CAUSE_LIST = UPSET + GOOD
 
 
-def anxiety_at(h):
-    base = 2.5 + 2.5 * (1 if 9 <= h <= 11 else 0) + 3.0 * (1 if 14 <= h <= 17 else 0) + 1.0 * (1 if h >= 20 else 0)
-    return max(1, min(10, round(base + random.gauss(0, 1.2))))
+def ts_of(day, minute):
+    return day * 86400000 + minute * 60000 - tz * 60000
 
 
-lines = []
+def clamp(v, lo=1, hi=10):
+    return max(lo, min(hi, int(round(v))))
+
+
+def hour_weighted():
+    hs = list(range(8, 22))
+    w = [2 if 9 <= h <= 11 else 3 if 14 <= h <= 17 else 2 if h >= 20 else 1 for h in hs]
+    return random.choices(hs, w)[0]
+
+
+entries = []   # dicts
+prompts = []   # (id, ts, window, status, answeredTs)
+
+
+def entry(ts, anx, wake, sleep, causes, day_flags, exercise, partner, source="manual", pid="", joy="", after="", tools=""):
+    local_min = ((ts + tz * 60000) // 60000) % 1440
+    dose = day_flags["dose"] if (day_flags["took_med"] and local_min >= day_flags["med_time"]) else ""
+    b = lambda v: "1" if v else "0"
+    entries.append((ts, "|".join([
+        str(ts), "" if anx is None else str(anx), b(random.random() < 0.6), b(random.random() < 0.7),
+        b(exercise and local_min >= 12 * 60), str(partner), str(wake), str(sleep), ";".join(causes),
+        dose, str(day_flags["med_time"]) if dose else "", "mg" if dose else "", "",
+        b(day_flags["sweats"]), b(day_flags["alcohol"]), b(day_flags["cannabis"]), str(tz),
+        str(joy), str(after), tools, source, pid,
+    ])))
+
+
 prev_alcohol = False
-prev_mean = 4.0   # previous day's mean anxiety, nudges night sweats
-for back in range(14, -1, -1):
+prev_mean = 3.0
+recalled_days = {8, 4}
+for back in range(DAYS - 1, -1, -1):
     day = today - back
+    d = datetime.date.fromordinal(day + 719163)      # epoch day -> date
+    bad = back in BAD_BACK
     wake = random.choice([405, 420, 435, 450])
-    sleep = random.choice([2, 3, 3, 4])
-    exercise = random.random() < 0.5
-    took_med = random.random() < 0.85
-    day_dose = "5" if back > 7 else "10"   # first week 5 mg, then 10 mg
-    med_time = wake + 45
-    alcohol = random.random() < 0.25
-    cannabis = random.random() < 0.15
-    sweats = random.random() < (0.55 if prev_alcohol else 0.15) + (0.2 if prev_mean >= 5 else 0)
-    day_anx = []
-    n = random.randint(3, 5)
-    hours = sorted(random.sample(range(8, 22), n))
-    for h in hours:
-        minute = random.randint(0, 59)
-        local_ms = day * 86400000 + (h * 60 + minute) * 60000
-        ts = local_ms - tz * 60000
-        if ts > now_ms - 60000:
+    sleep = random.choice([1, 2, 2]) if bad else random.choice([3, 3, 4, 4, 2])
+    exercise = (not bad) and random.random() < 0.5
+    flags = {
+        "took_med": random.random() < 0.85, "dose": "5" if back > 10 else "10", "med_time": wake + 45,
+        "alcohol": random.random() < 0.25, "cannabis": random.random() < 0.12,
+    }
+    flags["sweats"] = random.random() < (0.55 if prev_alcohol else 0.15) + (0.2 if prev_mean >= 4 else 0)
+    day_vals = []
+
+    # --- manual entries, skewed to upset moments ---
+    if bad:
+        levels = [5, 7, 8, 6, 7, 8][: random.choice([5, 6])]
+    else:
+        levels = [random.choice([4, 5, 5, 6, 6, 7]) for _ in range(random.choice([1, 2, 2, 3]))]
+    n = len(levels)
+    mins = sorted(random.sample(range(8, 22), n))
+    spikes = []
+    for i, (h, lv) in enumerate(zip(mins, levels)):
+        m = h * 60 + random.randint(0, 50)
+        ts = ts_of(day, m)
+        if ts > CUTOFF:
             continue
-        a = anxiety_at(h)
-        day_anx.append(a)
-        if a >= 6:
-            cs = random.sample(causes_pool[:3], random.randint(1, 2))
-        elif a >= 4:
-            cs = random.sample(causes_pool, 1)
+        partner = 2 if random.random() < (0.5 if bad else 0.15) else random.choice([0, 0, 1])
+        causes = random.sample(UPSET[:5], random.choice([1, 1, 2]))
+        if partner == 2 and "Conflict at home" not in causes:
+            causes[0] = "Conflict at home"
+        after, tools = "", ""
+        if lv >= 6 and random.random() < 0.45:
+            tl = random.choice([["breathe"], ["ground"], ["card", "breathe"]])
+            tools = ";".join(tl)
+            after = clamp(lv - random.choice([2, 2, 3]), 1)
+        entry(ts, lv, wake, sleep, causes, flags, exercise, partner, "manual", "", "", after, tools)
+        day_vals.append(lv)
+        spikes.append((m, lv))
+    # --- follow-ups after spikes: fades toward baseline ~2 ---
+    for si, (m, lv) in enumerate(spikes):
+        if lv < 5:
+            continue
+        nxt = spikes[si + 1][0] if si + 1 < len(spikes) else 24 * 60
+        sdt = datetime.datetime(d.year, d.month, d.day, m // 60, m % 60)
+        prev = lv
+        for k, fm in enumerate(FOLLOW_MIN):
+            t = m + fm
+            if t >= nxt or t < 7 * 60 or t > 22 * 60 + 30:
+                break
+            pts = ts_of(day, t)
+            if pts > CUTOFF:
+                break
+            pid = "f" + sdt.strftime("%Y%m%d%H%M") + "-" + str(k)
+            if random.random() < 0.8:
+                dec = {0: 0.8, 1: 0.55, 2: 0.25}[k]
+                v = clamp(min(prev, 2 + (lv - 2) * dec + random.uniform(-0.6, 0.6)), 1, prev)
+                ats = pts + random.randint(1, 12) * 60000
+                prompts.append((pid, pts, FOLLOWUP_WINDOW + k, "answered", ats))
+                entry(ats, v, wake, sleep, [], flags, exercise, 1, "followup", pid)
+                prev = v
+                day_vals.append(v)
+                if v <= 3:
+                    break
+            else:
+                prompts.append((pid, pts, FOLLOWUP_WINDOW + k, random.choice(["expired", "skipped"]), ""))
+    # --- random check-ins ---
+    for w, (a, b_) in enumerate(WINDOWS):
+        m = random.randint(a, b_ - 10)
+        sts = ts_of(day, m)
+        if sts > CUTOFF:
+            continue
+        pid = "p" + d.strftime("%Y%m%d") + "-" + str(w)
+        r = random.random()
+        if r < 0.8:
+            base = [2, 2, 2, 3, 3] if w == 0 else [2, 3, 3, 4] if w == 1 else [1, 2, 2, 3]
+            v = random.choice(base) + (2 if bad else 0) + (1 if prev_mean >= 4.5 and random.random() < 0.3 else 0)
+            v = clamp(v, 1, 6)
+            ats = sts + random.randint(2, 25) * 60000
+            prompts.append((pid, sts, w, "answered", ats))
+            entry(ats, v, wake, sleep, [], flags, exercise, 1, "prompted", pid)
+            day_vals.append(v)
         else:
-            cs = ["No clear reason"] if random.random() < 0.5 else []
-        f = lambda v: "" if v is None else str(v)
-        b = lambda v: "1" if v else "0"
-        dose = day_dose if (took_med and h * 60 + minute >= med_time) else ""
-        lines.append("|".join([
-            str(ts), str(a), b(random.random() < 0.6), b(random.random() < 0.7),
-            b(exercise and h >= 12), str(random.choice([0, 0, 1, 2])), str(wake), str(sleep),
-            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
-            b(sweats), b(alcohol), b(cannabis), str(tz), "",
-        ]))
-    # Joy-only entries (no anxiety value): 1-2 per day, slightly lower joy on the higher dose.
-    for _ in range(random.randint(1, 2)):
-        h = random.randint(9, 21)
-        minute = random.randint(0, 59)
-        ts = day * 86400000 + (h * 60 + minute) * 60000 - tz * 60000
-        if ts > now_ms - 60000:
+            prompts.append((pid, sts, w, "skipped" if r < 0.92 else "expired", ""))
+    # --- recalled entries ("Earlier today...") ---
+    if back in recalled_days:
+        m = random.randint(9 * 60, 13 * 60)
+        ts = ts_of(day, m)
+        if ts <= CUTOFF:
+            entry(ts, 6, wake, sleep, ["Rumination"], flags, exercise, 1, "recalled")
+    # --- joy-only entries after something good ---
+    for _ in range(random.choice([0, 1, 1, 2])):
+        m = random.randint(10 * 60, 21 * 60)
+        ts = ts_of(day, m)
+        if ts > CUTOFF:
             continue
-        joy = random.choice([4, 4, 5, 3, 5] if day_dose == "5" else [3, 3, 4, 2, 3])
-        cs = ["Social"] if random.random() < 0.5 else []
-        dose = day_dose if (took_med and h * 60 + minute >= med_time) else ""
-        lines.append("|".join([
-            str(ts), "", b(random.random() < 0.6), b(random.random() < 0.7),
-            b(exercise and h >= 12), str(random.choice([0, 0, 1])), str(wake), str(sleep),
-            ";".join(cs), dose, str(med_time) if dose else "", "mg" if dose else "", "",
-            b(sweats), b(alcohol), b(cannabis), str(tz), str(joy),
-        ]))
-    prev_alcohol = alcohol
-    if day_anx:
-        prev_mean = sum(day_anx) / len(day_anx)
+        joy = random.choice([3, 4, 4, 5] if flags["dose"] == "5" else [2, 3, 3, 4])
+        entry(ts, None, wake, sleep, [random.choice(GOOD)], flags, exercise, random.choice([0, 1]), "manual", "", joy)
+    prev_alcohol = flags["alcohol"]
+    if day_vals:
+        prev_mean = sum(day_vals) / len(day_vals)
 
 os.makedirs(out, exist_ok=True)
+entries.sort()
 with open(os.path.join(out, "entries.txt"), "w") as fh:
-    fh.write("\n".join(lines))
+    fh.write("\n".join(l for _, l in entries))
+prompts.sort(key=lambda p: p[1])
+with open(os.path.join(out, "prompts.txt"), "w") as fh:
+    fh.write("\n".join("|".join(str(x) for x in p) for p in prompts))
 
 prefs = [
-    ("int", "anxiety", 6), ("int", "caffeine", 1), ("int", "food", 1), ("int", "exercise", 1),
+    ("int", "anxiety", 3), ("int", "caffeine", 1), ("int", "food", 1), ("int", "exercise", 1),
     ("long", "exerciseDay", today), ("int", "partner", 1),
     ("int", "wakeMin", 420), ("long", "wakeDay", today),
     ("int", "sleep", 3), ("long", "sleepDay", today),
-    ("int", "nightSweats", 1), ("long", "nightSweatsDay", today),
-    ("int", "alcohol", 1), ("long", "alcoholDay", today),
+    ("int", "nightSweats", 0), ("long", "nightSweatsDay", today),
+    ("int", "alcohol", 0), ("long", "alcoholDay", today),
     ("int", "cannabis", 0), ("long", "cannabisDay", today),
     ("string", "medDoseNum", "10.0"), ("string", "medUnit", "mg"), ("int", "medUsualTime", 480),
-    ("int", "intervalHours", 3),
     ("string", "medName", ""),
+    ("string", "causeList", "\n".join(CAUSE_LIST)),
+    # the calm intro must never show in screenshots; old reminder is already "migrated"
+    ("long", "introSeenVersion", 999999999), ("boolean", "promptsMigrated", "true"),
+    ("boolean", "promptsOn", "true"), ("boolean", "followupsOn", "true"),
+    # chart view/mode are rewritten by screenshots.sh before each launch
+    ("int", "chartView3", 0), ("boolean", "chartModeled", "true"),
 ]
 with open(os.path.join(out, "draft.xml"), "w") as fh:
     fh.write("<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n")
@@ -110,4 +203,4 @@ with open(os.path.join(out, "draft.xml"), "w") as fh:
         else:
             fh.write('    <%s name="%s" value="%s" />\n' % (t, k, v))
     fh.write("</map>\n")
-print("entries:", len(lines))
+print("entries:", len(entries), "prompts:", len(prompts))
