@@ -62,7 +62,13 @@ jobs:
           else
             echo "::warning::Signed release APK/AAB not found (signing secret missing?); skipping bcalm-release.apk and bcalm.aab upload."
           fi
+      # The Play API rejects status "completed" while the Play Console app is still a
+      # "Draft app" (never published); only status "draft" is allowed then. Try
+      # "completed" first (auto rollout to internal testers) and fall back to a draft
+      # release if it fails. Once the app leaves draft, the fallback is never needed.
       - name: Upload to Google Play internal track
+        id: play
+        continue-on-error: true
         if: github.ref == 'refs/heads/main' && env.PLAY_JSON != ''
         uses: r0adkll/upload-google-play@v1.1.3
         with:
@@ -71,3 +77,12 @@ jobs:
           releaseFiles: app/build/outputs/bundle/playRelease/app-play-release.aab
           track: internal
           status: completed
+      - name: Upload to Google Play internal track (draft app fallback)
+        if: github.ref == 'refs/heads/main' && env.PLAY_JSON != '' && steps.play.outcome == 'failure'
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: io.github.dreamins.bcalm
+          releaseFiles: app/build/outputs/bundle/playRelease/app-play-release.aab
+          track: internal
+          status: draft
