@@ -147,7 +147,7 @@ private fun baselineOf(rated: List<Entry>): Pair<BaselineFn, Boolean> {
         }
         if (pts.isEmpty()) constant(median(prompted.map { it.anxiety!!.toDouble() }))
         else BaselineFn(DoubleArray(pts.size) { pts[it].first }, DoubleArray(pts.size) { pts[it].second })
-    } else rated.filter { !it.isFollowup() }.let { l -> constant(if (l.isEmpty()) 2.0 else percentile(l.map { it.anxiety!! }, 25.0)) }
+    } else rated.filter { !it.isFollowup() && !it.isRecalled() }.let { l -> constant(if (l.isEmpty()) 2.0 else percentile(l.map { it.anxiety!! }, 25.0)) }
     return base to fromCheckins
 }
 
@@ -168,6 +168,7 @@ private fun fadeFits(rated: List<Entry>, base: BaselineFn): List<Pair<LocalDate,
         val gap = (e1.ts - e0.ts) / 60000.0
         if (gap < 10.0 || gap > 360.0) continue
         if (!e1.isPrompted() && !e1.isFollowup()) continue
+        if (e0.isRecalled()) continue   // a recalled rating's time is the user's guess: never half of a fade pair
         val b0 = base.at(e0.minuteOfDay().toDouble())
         val b1 = base.at(e1.minuteOfDay().toDouble())
         val a0 = e0.anxiety!!

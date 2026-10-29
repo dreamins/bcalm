@@ -127,12 +127,14 @@ fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0, prom
         onPromptDone()
     }
     promptOpen?.let { id ->
-        PromptSheet(onClose = { promptOpen = null }, title = if (id.startsWith("f")) "How is it now?" else "How's your anxiety right now?") { n, details ->
-            promptOpen = null
-            if (vm.answerPrompt(id, n) != null) {
+        PromptSheet(vm, onClose = { promptOpen = null }, title = if (id.startsWith("f")) "How is it now?" else "How's your anxiety right now?") { n, details ->
+            val e = vm.answerPrompt(id, n)
+            if (e != null) {
                 if (details) tab = 0
                 scope.launch { snack.currentSnackbarData?.dismiss(); snack.showSnackbar("Saved") }
             }
+            // After a drop from a logged spike the sheet stays open for a second step: what helped?
+            if (e != null && !details && vm.spikeBefore(e) != null) HelpInfo(e.ts, vm.calmingCauses()) else null
         }
     }
     val t = MaterialTheme.bcalm
@@ -374,25 +376,76 @@ private fun boolToIdx(b: Boolean?): Int? = b?.let { if (it) 0 else 1 }
 private fun idxToBool(i: Int?): Boolean? = i?.let { it == 0 }
 private val YES_NO = listOf("Yes", "No")
 
-/** One-tap check-in sheet: tapping a number saves it; "Add details" first makes the save open the Log tab on that entry. */
+/** Second step of the check-in sheet: the saved entry [ts] and the calming-cause [options] to offer. */
+private class HelpInfo(val ts: Long, val options: List<String>)
+
+/**
+ * One-tap check-in sheet: tapping a number saves it; "Add details" first makes the save open the Log tab on that entry.
+ * [onPick] returns a [HelpInfo] to keep the sheet open for "What helped?", or null to close it.
+ */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun PromptSheet(onClose: () -> Unit, title: String = "How's your anxiety right now?", onPick: (Int, Boolean) -> Unit) {
+private fun PromptSheet(vm: MainViewModel, onClose: () -> Unit, title: String = "How's your anxiety right now?", onPick: (Int, Boolean) -> HelpInfo?) {
     val t = MaterialTheme.bcalm
     val haptic = LocalHapticFeedback.current
     var details by remember { mutableStateOf(false) }
+    var help by remember { mutableStateOf<HelpInfo?>(null) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.card) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        val h = help
+        if (h == null) Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
             ScaleRow(10, null, height = 46.dp, gap = 4.dp, allowClear = false) { i ->
-                if (i != null) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPick(i + 1, details) }
+                if (i != null) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val r = onPick(i + 1, details)
+                    if (r != null) help = r else onClose()
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Caption("Calm"); Caption("Overwhelmed")
             }
             TextButton(onClick = { details = !details }) {
                 Text(if (details) "Add details after saving \u2713" else "Add details")
+            }
+        } else {
+            var opts by remember { mutableStateOf(h.options) }
+            var sel by remember { mutableStateOf(emptySet<String>()) }
+            var joy by remember { mutableStateOf<Int?>(null) }
+            var adding by remember { mutableStateOf(false) }
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Glad it's easing. What helped?", style = MaterialTheme.typography.titleLarge)
+                opts.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { c ->
+                            CauseCell(c, c in sel, Modifier.weight(1f), onLongClick = {}) { sel = if (c in sel) sel - c else sel + c }
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+                TextButton(onClick = { adding = true }) { Text("+ Add", fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+                Text("How much did it lift you?", fontSize = 13.sp, color = t.secondary)
+                ScaleRow(5, joy?.minus(1), height = 42.dp, gap = 6.dp, allowClear = true) { i -> joy = i?.plus(1) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onClose) { Text("Skip") }
+                    TextButton(onClick = {
+                        if (sel.isNotEmpty() || joy != null) vm.saveHelped(h.ts, opts.filter { it in sel }, joy)
+                        onClose()
+                    }) { Text("Done", fontWeight = FontWeight.SemiBold) }
+                }
+            }
+            if (adding) {
+                var text by remember { mutableStateOf("") }
+                AlertDialog(onDismissRequest = { adding = false },
+                    title = { Text("New cause") },
+                    text = { OutlinedTextField(value = text, onValueChange = { text = it.take(30) }, singleLine = true, shape = SmallShape) },
+                    confirmButton = { TextButton(onClick = {
+                        val n = vm.addCauseOnly(text)
+                        if (n.isNotEmpty()) { if (opts.none { it.equals(n, true) }) opts = opts + n; sel = sel + n }
+                        adding = false
+                    }) { Text("Add") } },
+                    dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } })
             }
         }
     }
@@ -408,6 +461,9 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val sel by vm.selectedCauses.collectAsStateWithLifecycle()
     val activeEntry by vm.activeEntry.collectAsStateWithLifecycle()
     val todayOpen by vm.todayOpen.collectAsStateWithLifecycle()
+    val recalled by vm.recalledMin.collectAsStateWithLifecycle()
+    var showRecall by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -422,7 +478,7 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     val cards by vm.cards.collectAsStateWithLifecycle()
     var dismissed by remember { mutableStateOf(Store.dismissedCalm()) }
     // Calm card target: the latest high log of the last 30 min not yet re-rated or dismissed (survives reopening).
-    val calm = entries.lastOrNull { (it.anxiety ?: 0) >= 6 && it.after == null && it.ts !in dismissed && now - it.ts <= 30 * 60_000L }
+    val calm = entries.lastOrNull { !it.isRecalled() && (it.anxiety ?: 0) >= 6 && it.after == null && it.ts !in dismissed && now - it.ts <= 30 * 60_000L }
     var lastCalm by remember { mutableStateOf<Entry?>(null) }
     if (calm != null && calm != lastCalm) lastCalm = calm   // kept so the card can animate out
     var sheetOpen by remember { mutableStateOf(false) }
@@ -465,6 +521,13 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
         else -> "Nothing logged yet"
     }
 
+    if (showRecall) TimeDialog(recalled ?: java.time.Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).let { it.hour * 60 + it.minute },
+        onDismiss = { showRecall = false }) { m ->
+        val ts = LocalDate.now().atTime(m / 60, m % 60).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        if (ts < System.currentTimeMillis()) { vm.setRecalled(m); showRecall = false }
+        else android.widget.Toast.makeText(ctx, "Pick a time earlier today", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     if (sheetOpen) (calm ?: lastCalm)?.let { e ->
         CalmSheet(e, active?.ts == e.ts, sel, causes, entries, cards, vm,
             onClose = { sheetOpen = false },
@@ -500,6 +563,17 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Caption("Calm"); Caption("Overwhelmed")
+                }
+                if (recalled != null) {
+                    Box(Modifier.clip(RoundedCornerShape(8.dp)).background(t.accentTint)
+                        .clickable(role = Role.Button) { vm.setRecalled(null) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                        Text("At ${fmtMin(recalled ?: 0)} · recalled \u2715", fontSize = 12.sp, color = t.accent)
+                    }
+                } else {
+                    TextButton(onClick = { showRecall = true }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                        Text("Earlier today\u2026", fontSize = 12.sp, color = t.secondary)
+                    }
                 }
                 if (active != null) {
                     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.accentTint)
@@ -1082,7 +1156,13 @@ fun ChartScreen(vm: MainViewModel) {
             } else AnnotatedString(sentenceText)
             Text(sentence, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
             if (showModeled) {
-                if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (curve.days.isNotEmpty() && view == 2) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
+                    StatTile("Bad days", "${curve.hoursAbove5.values.count { it >= 1.0 }} of ${curve.days.size}", Modifier.weight(1f), "\u2265 1 h above 5")
+                    curve.dailyBand.maxByOrNull { it.value.second }?.let { (day, b) ->
+                        StatTile("Worst day", day.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())), Modifier.weight(1f), "%.1f peak".format(b.second))
+                    }
+                } else if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
                     if (view != 2 && cw != null && cLabel != null) StatTile(cLabel, "%.1f".format(cw.mean), Modifier.weight(1f))
                     StatTile("Hours > 5 / day", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f))
@@ -1113,7 +1193,7 @@ fun ChartScreen(vm: MainViewModel) {
                 Caption("Hours since waking, for the ${ins.wakeCount} entries with a wake time. Bars are the average of logged moments in each hour; red and green lines are the 90th and 10th percentile; dots are single entries.")
             } else if (showModeled) {
                 TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp), curve.dailyBand)
-                Caption("Date. Line is the time-weighted daily level from the modeled curve; red and green are the day's 90th and 10th percentile; dots are your ratings.")
+                Caption("Date. Bold line is each day's worst stretch (the level of its worst 10%); thin line is the day's time-weighted average; dots are your ratings.")
             } else {
                 TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
                 Caption("Date. Line is the average of logged moments; red and green lines are the daily 90th and 10th percentile; dots are single entries.")
@@ -1648,7 +1728,7 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier, band: Map
             drawCircle(dot, 2.dp.toPx(), Offset(x(e.dateTime.atZone(zone).toInstant().toEpochMilli()), y(e.anxiety!!.coerceIn(1, 10).toFloat())))
         }
         val pts = if (band != null) band.toSortedMap().map { (day, b) ->
-            Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), y(b.first.toFloat()))
+            Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), y(b.second.toFloat()))   // worst stretch = day's p90
         } else data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()),
                 y(es.map { it.anxiety!!.coerceIn(1, 10) }.average().toFloat()))
@@ -1658,9 +1738,22 @@ fun TimeSeriesChart(data: List<Entry>, range: Int, modifier: Modifier, band: Map
             drawPath(path, line, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         pts.forEach { drawCircle(line, 3.dp.toPx(), it) }
-        val dayVals = if (band != null) band.toSortedMap().map { (day, b) ->
-            Triple(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), b.second.toFloat(), b.third.toFloat())
-        } else data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
+        if (band != null) {
+            val mq = band.toSortedMap().map { (day, b) ->
+                Offset(x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()), y(b.first.toFloat()))
+            }
+            if (mq.size > 1) {
+                val path = Path().apply { moveTo(mq[0].x, mq[0].y); mq.drop(1).forEach { lineTo(it.x, it.y) } }
+                drawPath(path, txt, style = Stroke(1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            val ls = TextStyle(color = line, fontSize = 10.sp)
+            val m1 = measurer.measure("worst stretch", ls)
+            drawText(m1, topLeft = Offset(l + 6.dp.toPx(), t))
+            drawText(measurer.measure("daily average", style), topLeft = Offset(l + 14.dp.toPx() + m1.size.width, t))
+            drawLine(baseline, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
+            return@Canvas
+        }
+        val dayVals = data.groupBy { it.dateTime.toLocalDate() }.toSortedMap().map { (day, es) ->
             val xx = x(day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli())
             val v = es.map { it.anxiety!!.coerceIn(1, 10) }
             Triple(xx, percentile(v, 90.0).toFloat(), percentile(v, 10.0).toFloat())
@@ -1766,7 +1859,7 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                                     style = MaterialTheme.typography.titleLarge, fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold)
                                 Column(Modifier.weight(1f)) {
-                                    Text(e.dateTime.format(timeFmt) + if (e.isPrompted()) "  · check-in" else if (e.isFollowup()) "  · follow-up" else "",
+                                    Text(e.dateTime.format(timeFmt) + if (e.isPrompted()) "  · check-in" else if (e.isFollowup()) "  · follow-up" else if (e.isRecalled()) "  · recalled" else "",
                                         style = MaterialTheme.typography.bodyLarge)
                                     val detail = detailLine(e)
                                     if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,

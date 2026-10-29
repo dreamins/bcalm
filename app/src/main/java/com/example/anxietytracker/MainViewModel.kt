@@ -37,6 +37,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val activeEntry: StateFlow<Entry?> = _active
     private var expireJob: Job? = null
 
+    /** Minute of today picked with "Earlier today…": the next anxiety tap logs a recalled entry at that time (null = off). */
+    private val _recalledMin = MutableStateFlow<Int?>(null)
+    val recalledMin: StateFlow<Int?> = _recalledMin
+    fun setRecalled(min: Int?) { _recalledMin.value = min }
+
     /** Snackbar messages for entries logged by a non-anxiety change (shown by the Log screen). */
     private val _logEvents = MutableSharedFlow<LogResult>(extraBufferCapacity = 8)
     val logEvents: SharedFlow<LogResult> = _logEvents.asSharedFlow()
@@ -173,6 +178,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A number was tapped: log a new entry, or update the one logged moments ago. */
     fun tapAnxiety(n: Int): LogResult? {
+        _recalledMin.value?.let { return tapRecalled(it, n) }
         val prevDraft = _draft.value
         val a = liveActive()
         if (a != null && a.anxiety == n) {
@@ -206,6 +212,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (_active.value?.ts == a.ts) commit(a)
             restoreDraft(prevDraft)
         }
+    }
+
+    /**
+     * Logs [n] for minute [min] of today as a new recalled entry (same draft fields as a normal log). It never becomes the
+     * open entry, starts no follow-ups and does not open the calm card; the recalled time is cleared afterwards.
+     */
+    private fun tapRecalled(min: Int, n: Int): LogResult {
+        var ts = java.time.LocalDate.now().atTime(min / 60, min % 60).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        if (ts >= System.currentTimeMillis()) { _recalledMin.value = null; return LogResult("Pick a time earlier today") {} }
+        while (Store.entries.value.any { it.ts == ts }) ts += 1000
+        val prevDraft = _draft.value
+        val prevCauses = _causes.value
+        val d = prevDraft.copy(anxiety = n)
+        _draft.value = d
+        Store.saveDraft(d)
+        val e = Store.entryFrom(d, orderedCauses(), ts, localOffsetMin(ts)).copy(source = SOURCE_RECALLED)
+        Store.add(e)
+        _recalledMin.value = null
+        if (_active.value == null) _causes.value = emptySet()   // causes describe that moment; no open entry to keep them for
+        return LogResult("Logged $n for ${fmtMin(min)}") {
+            Store.delete(e)
+            _recalledMin.value = min
+            if (_active.value == null) _causes.value = prevCauses
+            restoreDraft(prevDraft)
+        }
+    }
+
+    /** Highest manual rating >= 5 in the 8 h before [e] when [e] is at least 2 below it, else null ("what helped?" trigger). */
+    fun spikeBefore(e: Entry): Int? {
+        val a = e.anxiety ?: return null
+        val sp = Store.entries.value.filter { it.isManual() && it.ts < e.ts && e.ts - it.ts <= 8 * 3_600_000L && (it.anxiety ?: 0) >= 5 }
+            .maxOfOrNull { it.anxiety!! } ?: return null
+        return sp.takeIf { a <= it - 2 }
+    }
+
+    /** Up to 8 calming causes: negative curve-pattern diff first (most negative first), then frequent on entries with anxiety <= 3. */
+    fun calmingCauses(): List<String> {
+        val all = Store.entries.value
+        val list = Store.causeList.value
+        val out = ArrayList<String>()
+        buildCurve(all).patterns.causes.filter { it.diff < 0 }.sortedBy { it.diff }.forEach { if (it.label in list) out += it.label }
+        all.filter { (it.anxiety ?: 99) <= 3 }.flatMap { it.causes.distinct() }.groupingBy { it }.eachCount().entries
+            .sortedByDescending { it.value }.forEach { if (it.key in list && it.key !in out) out += it.key }
+        return out.take(8)
+    }
+
+    /** Adds [c] to the cause list (like the Log screen) without selecting it anywhere; returns the cleaned name. */
+    fun addCauseOnly(c: String): String {
+        Store.addCause(c)
+        val n = c.trim().replace(Regex("[;|,\n]"), " ").take(30)
+        return Store.causeList.value.firstOrNull { it.equals(n, true) } ?: ""
+    }
+
+    /** Saves "what helped" causes and joy on the entry at [ts] (keeps the open entry in sync). */
+    fun saveHelped(ts: Long, causes: List<String>, joy: Int?) {
+        val cur = Store.entries.value.firstOrNull { it.ts == ts } ?: return
+        val e = cur.copy(causes = Store.causeList.value.filter { it in causes } + causes.filter { it !in Store.causeList.value },
+            joy = joy ?: cur.joy)
+        if (_active.value?.ts == ts) { _causes.value = e.causes.toSet(); commit(e) } else Store.update(e)
     }
 
     /**

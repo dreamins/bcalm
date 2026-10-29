@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                     if (Build.VERSION.SDK_INT >= 33) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
                 val vm: MainViewModel = viewModel()
+                LaunchedEffect(promptId) { if (promptId != null) showIntro = false }   // notification tapped over the intro: show the sheet, don't mark seen
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh(); Prompts.plan(ctx); CsvSync.enqueueIfEnabled(ctx) }   // also picks up outside edits of the sync file
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onAppStopped() }
                 AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0),

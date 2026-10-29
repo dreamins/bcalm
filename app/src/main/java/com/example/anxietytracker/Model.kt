@@ -58,7 +58,7 @@ data class Entry(
     val joy: Int? = null,         // 1..5, optional: how much a positive moment landed (no carry-over)
     val after: Int? = null,       // 1..10, optional: anxiety re-rated after a coping tool
     val tools: List<String> = emptyList(),   // coping tools used: "card", "breathe", "ground"
-    val source: String = SOURCE_MANUAL,      // SOURCE_MANUAL | SOURCE_PROMPTED | SOURCE_FOLLOWUP
+    val source: String = SOURCE_MANUAL,      // SOURCE_MANUAL | SOURCE_PROMPTED | SOURCE_FOLLOWUP | SOURCE_RECALLED
     val promptId: String? = null,            // PromptRec.id when answered from a prompted check-in
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
@@ -83,15 +83,18 @@ data class Entry(
 const val SOURCE_MANUAL = "manual"
 const val SOURCE_PROMPTED = "prompted"
 const val SOURCE_FOLLOWUP = "followup"
+const val SOURCE_RECALLED = "recalled"   // logged afterwards for an earlier time today
 
 fun Entry.isPrompted() = source == SOURCE_PROMPTED
 fun Entry.isFollowup() = source == SOURCE_FOLLOWUP
 /** Logged by the user (not a random check-in, not a follow-up). */
 fun Entry.isManual() = source == SOURCE_MANUAL
+/** Added later for an earlier time today: a curve point, but not a baseline, spike or check-in value. */
+fun Entry.isRecalled() = source == SOURCE_RECALLED
 
 /** Stored/CSV source text -> known source; anything else (or null) is manual. */
 fun parseSource(s: String?): String = when (s?.trim()?.lowercase()) {
-    SOURCE_PROMPTED -> SOURCE_PROMPTED; SOURCE_FOLLOWUP -> SOURCE_FOLLOWUP; else -> SOURCE_MANUAL
+    SOURCE_PROMPTED -> SOURCE_PROMPTED; SOURCE_FOLLOWUP -> SOURCE_FOLLOWUP; SOURCE_RECALLED -> SOURCE_RECALLED; else -> SOURCE_MANUAL
 }
 
 const val PROMPT_PENDING = "pending"
