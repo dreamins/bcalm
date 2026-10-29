@@ -1026,16 +1026,18 @@ private fun StatTile(label: String, value: String, modifier: Modifier) {
 fun ChartScreen(vm: MainViewModel) {
     val all by vm.entries.collectAsStateWithLifecycle()
     var range by remember { mutableIntStateOf(30) }  // 7, 30, 0 = all
+    val prompts by Store.prompts.collectAsStateWithLifecycle()
+    val cutoff = remember(range) {
+        if (range == 0) 0L else
+            LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+    val insPair = remember(all, range) { computeInsightsFor(all.filter { it.ts >= cutoff }) }
+    val ins = insPair.first
+    val promptedBased = insPair.second
     val data = remember(all, range) {
-        val cutoff = if (range == 0) 0L else
-            LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        all.filter { it.anxiety != null && it.ts >= cutoff }
+        all.filter { it.anxiety != null && it.ts >= cutoff && (!promptedBased || it.isPrompted()) }
     }
-    val ins = remember(all, range) {
-        val cutoff = if (range == 0) 0L else
-            LocalDate.now().minusDays(range - 1L).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        computeInsights(all.filter { it.ts >= cutoff })
-    }
+    val checkins = remember(all, prompts, range) { computeCheckins(all, prompts, cutoff) }
     val t = MaterialTheme.bcalm
     val ranges = listOf(7, 30, 0)
     var view by remember { mutableIntStateOf(Store.chartView) }
@@ -1082,7 +1084,12 @@ fun ChartScreen(vm: MainViewModel) {
                 TimeSeriesChart(data, range, Modifier.fillMaxWidth().height(220.dp))
                 Caption("Date. Line is the daily average; red and green lines are the daily 90th and 10th percentile; dots are single entries.")
             }
+            if (promptedBased) Caption("Based on check-ins (your typical day).")
+            else if (Store.promptsOn || all.any { it.ts >= cutoff && it.isPrompted() })
+                Caption("Based mostly on entries you logged yourself — these show spikes more than your baseline.")
         }
+
+        CheckinsCard(checkins, promptedBased)
 
         if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
             SectionCard(spacing = 0.dp) {
@@ -1149,6 +1156,77 @@ fun ChartScreen(vm: MainViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun CheckinsCard(c: Checkins, promptedBased: Boolean) {
+    val t = MaterialTheme.bcalm
+    SectionCard {
+        CardHeader("Check-ins")
+        if (!c.hasAny) {
+            Caption("Turn on random check-ins in Settings to see your typical day, not just the hard moments.")
+            return@SectionCard
+        }
+        fun f(m: MeanN) = m.mean?.let { "%.1f".format(it) } ?: "—"
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatTile("Typical day", f(c.typical), Modifier.fillMaxWidth())
+                Caption("${c.typical.n} check-ins", Modifier.padding(start = 4.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatTile("Logged spikes", f(c.spikes), Modifier.fillMaxWidth())
+                Caption("${c.spikes.n} logged", Modifier.padding(start = 4.dp))
+            }
+        }
+        if (c.typical.n < 5) {
+            Caption("A few more check-ins needed for a reliable typical day.")
+        } else {
+            Column {
+                listOf("Morning", "Afternoon", "Evening").forEachIndexed { i, name ->
+                    MeanRow(name, c.windows[i], divider = i < 2)
+                }
+            }
+        }
+        if (c.daily.count { it != null } >= 3) {
+            val bar = t.accent
+            Canvas(Modifier.fillMaxWidth().height(48.dp)) {
+                val slot = size.width / c.daily.size
+                val bw = slot * 0.55f
+                c.daily.forEachIndexed { i, v ->
+                    if (v == null) return@forEachIndexed
+                    val h = (size.height * (v.toFloat() / 10f)).coerceIn(2.dp.toPx(), size.height)
+                    drawRoundRect(bar, Offset(slot * i + (slot - bw) / 2f, size.height - h), Size(bw, h),
+                        CornerRadius(3.dp.toPx(), 3.dp.toPx()))
+                }
+            }
+            Caption("Typical-day average, last 7 days.")
+        }
+        if (c.topCauses.isNotEmpty())
+            Caption("Top causes when you log: " + c.topCauses.joinToString(", ") { "${it.first} (${it.second})" })
+        if (c.total > 0) {
+            val pct = Math.round(100.0 * c.answered / c.total).toInt()
+            val low = c.total >= 6 && pct < 70
+            Text("Answered ${c.answered} of ${c.total} check-ins ($pct%)", fontSize = 14.sp,
+                color = if (low) t.high else MaterialTheme.colorScheme.onSurface)
+            if (low) Caption("Below 70%: the typical-day numbers may miss harder moments.")
+            val sk = c.skippedNearby
+            val tm = c.typical.mean
+            if (sk.n >= 2 && sk.mean != null && tm != null && sk.mean - tm >= 1.0)
+                Caption("Around skipped check-ins you logged %.1f on average — skipped ones may have been harder moments.".format(sk.mean))
+        }
+    }
+}
+
+@Composable
+private fun MeanRow(label: String, m: MeanN, divider: Boolean) {
+    val t = MaterialTheme.bcalm
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontSize = 15.sp)
+        Text("n ${m.n}", Modifier.padding(end = 10.dp), fontSize = 12.sp, color = t.secondary)
+        Text(m.mean?.let { "%.1f".format(it) } ?: "—", Modifier.widthIn(min = 44.dp), textAlign = TextAlign.End,
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+    if (divider) HorizontalDivider(color = t.innerDivider)
 }
 
 /** Dose label | thin anxiety bar (avg/10) + value | thin joy bar (avg/5) + value. */
@@ -1441,7 +1519,8 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                                     style = MaterialTheme.typography.titleLarge, fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold)
                                 Column(Modifier.weight(1f)) {
-                                    Text(e.dateTime.format(timeFmt), style = MaterialTheme.typography.bodyLarge)
+                                    Text(e.dateTime.format(timeFmt) + if (e.isPrompted()) "  · check-in" else "",
+                                        style = MaterialTheme.typography.bodyLarge)
                                     val detail = detailLine(e)
                                     if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
                                         color = t.secondary)

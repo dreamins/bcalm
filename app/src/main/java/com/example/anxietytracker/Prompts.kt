@@ -79,7 +79,7 @@ object Prompts {
                     if (Store.prompts.value.any { it.id == id }) continue
                     val (s, e) = Store.promptWindow(w)
                     val ts = tsOf(date, Random.nextInt(s, e))
-                    if (date == today && tsOf(date, e) <= now) continue   // window already over: not sampled today
+                    if (date == today && ts <= now) continue   // random time already past: would never fire, so not sampled today
                     Store.upsertPrompt(PromptRec(id, ts, w, PROMPT_PENDING))
                 }
             }

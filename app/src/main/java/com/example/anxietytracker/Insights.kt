@@ -264,3 +264,65 @@ private fun hardestWindow(
     if (bestStart < 0 || bestScore < 0.5) return null
     return HardWindow(bestStart, width, label(bestStart), bestAvg, bestScore, bestDays)
 }
+
+/** Min prompted rated entries / distinct days before time-of-day and factor analysis uses check-ins only. */
+const val PROMPTED_ONLY_MIN_ENTRIES = 30
+const val PROMPTED_ONLY_MIN_DAYS = 7
+
+/** True when [rangeEntries] hold enough prompted rated entries (>= 30 on >= 7 distinct days) for a prompted-only analysis. */
+fun promptedOnlyOk(rangeEntries: List<Entry>): Boolean {
+    val p = rangeEntries.filter { it.isPrompted() && it.anxiety != null }
+    return p.size >= PROMPTED_ONLY_MIN_ENTRIES && p.map { it.dateTime.toLocalDate() }.distinct().size >= PROMPTED_ONLY_MIN_DAYS
+}
+
+/**
+ * [computeInsights] where the hardest windows and the factor rows come from prompted entries only when
+ * [promptedOnlyOk]; causes always stay on all entries. Second value: whether prompted-only was used.
+ */
+fun computeInsightsFor(rangeEntries: List<Entry>): Pair<Insights, Boolean> {
+    val base = computeInsights(rangeEntries)
+    if (!promptedOnlyOk(rangeEntries)) return base to false
+    val p = computeInsights(rangeEntries.filter { it.isPrompted() })
+    return base.copy(count = p.count, avg = p.avg, sentence = p.sentence, wakeSentence = p.wakeSentence,
+        factors = p.factors, hard = p.hard, wakeHard = p.wakeHard, wakeCount = p.wakeCount, wakeAvg = p.wakeAvg) to true
+}
+
+/** Mean anxiety [mean] over [n] entries; mean is null when n is 0. */
+data class MeanN(val n: Int, val mean: Double?)
+
+/**
+ * Check-ins summary. [typical]/[windows] = prompted rated entries (windows Morning, Afternoon, Evening); [daily] =
+ * typical-day mean for each of the last 7 days (oldest first, null = no check-ins); [spikes]/[topCauses] = manual
+ * rated entries; [answered] of [total] resolved prompts; [skippedNearby] = mean anxiety of the manual entry nearest
+ * each skipped/expired prompt (within 2 h). [hasAny] = any prompt or prompted entry in range.
+ */
+data class Checkins(
+    val typical: MeanN, val windows: List<MeanN>, val daily: List<Double?>,
+    val spikes: MeanN, val topCauses: List<Pair<String, Int>>,
+    val answered: Int, val total: Int, val skippedNearby: MeanN, val hasAny: Boolean,
+)
+
+fun computeCheckins(all: List<Entry>, prompts: List<PromptRec>, fromMs: Long): Checkins {
+    val inRange = all.filter { it.ts >= fromMs && it.anxiety != null }
+    val prompted = inRange.filter { it.isPrompted() }
+    val manual = inRange.filter { !it.isPrompted() }
+    fun mn(l: List<Entry>) = MeanN(l.size, if (l.isEmpty()) null else l.map { it.anxiety!! }.average())
+    val byId = prompts.associateBy { it.id }
+    val win = prompted.groupBy { e ->
+        byId[e.promptId]?.window?.coerceIn(0, 2) ?: e.dateTime.hour.let { if (it < 13) 0 else if (it < 18) 1 else 2 }
+    }
+    val today = java.time.LocalDate.now()
+    val byDay = prompted.groupBy { it.dateTime.toLocalDate() }
+    val daily = (6 downTo 0).map { k -> byDay[today.minusDays(k.toLong())]?.map { it.anxiety!! }?.average() }
+    val causes = manual.flatMap { it.causes.distinct() }.groupingBy { it }.eachCount().entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).take(3).map { it.key to it.value }
+    val resolved = prompts.filter { it.scheduledTs >= fromMs && it.status != PROMPT_PENDING }
+    val near = resolved.filter { it.status == PROMPT_SKIPPED || it.status == PROMPT_EXPIRED }.mapNotNull { p ->
+        all.filter { !it.isPrompted() && it.anxiety != null && abs(it.ts - p.scheduledTs) <= 2 * 3_600_000L }
+            .minByOrNull { abs(it.ts - p.scheduledTs) }?.anxiety
+    }
+    return Checkins(mn(prompted), (0..2).map { mn(win[it].orEmpty()) }, daily, mn(manual), causes,
+        resolved.count { it.status == PROMPT_ANSWERED }, resolved.size,
+        MeanN(near.size, if (near.isEmpty()) null else near.average()),
+        prompts.any { it.scheduledTs >= fromMs } || prompted.isNotEmpty())
+}
