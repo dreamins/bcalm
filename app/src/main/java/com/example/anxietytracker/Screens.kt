@@ -1149,17 +1149,20 @@ fun ChartScreen(vm: MainViewModel) {
                 else if (cLabel != null) "Hard moments most often hit $cLabel (${hb!!.k} of ${hb.n} days)."
                 else "Hard moments don't stick to a time ${if (view == 1) "since waking" else "of day"}: no hour was above 5 on more than ${hb!!.maxHour} of $hbDays days."
             } else if (showModeled) {
-                val ow = if (view == 1) curve.wakeHardest else curve.hardest
-                val ol = ow?.let { if (view == 1) "${it.start}–${it.start + 2} h after you wake up" else windowLabel(it.start) }
-                if (ol != null) "Your anxiety tends to run highest $ol."
-                else if (view == 1) "No time since waking stands out in the modeled curve yet."
-                else "No time of day stands out in the modeled curve yet."
+                val nd = curve.days.size
+                if (nd < 3) "A few more days needed to see the trend."
+                else {
+                    val bad = curve.hoursAbove5.values.count { it >= 1.0 }
+                    val ds = curve.dailyMean.toSortedMap().values.toList()
+                    val recent = ds.takeLast(nd / 2).average()
+                    val earlier = ds.take(nd - nd / 2).average()
+                    val trend = if (nd < 6) "" else if (recent <= earlier - 0.3) " \u2014 lately calmer"
+                        else if (recent >= earlier + 0.3) " \u2014 lately harder" else ""
+                    "$bad of $nd days had an hour or more above 5.$trend"
+                }
             } else if (view == 1) ins.wakeSentence else ins.sentence
             val hard = if (view == 1) ins.wakeHard else ins.hard
-            val hlLabel = if (modTab) cLabel else if (showModeled) {
-                val ow = if (view == 1) curve.wakeHardest else curve.hardest
-                ow?.let { if (view == 1) "${it.start}–${it.start + 2} h after you wake up" else windowLabel(it.start) }
-            } else hard?.label
+            val hlLabel = if (modTab) cLabel else if (showModeled) null else hard?.label
             val cut = if (hlLabel != null) sentenceText.indexOf(hlLabel) else -1
             val sentence = if (hlLabel != null && cut >= 0) buildAnnotatedString {
                 append(sentenceText.substring(0, cut))
@@ -1176,8 +1179,8 @@ fun ChartScreen(vm: MainViewModel) {
                     }
                 } else if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
-                    if (view != 2 && cLabel != null) StatTile(cLabel, "${hb!!.k}/${hb.n} days", Modifier.weight(1f))
-                    StatTile("Hours > 5 / day", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f))
+                    if (view != 2 && cLabel != null) StatTile("Hardest", "${hb!!.k}/${hb.n} days", Modifier.weight(1f), cLabel)
+                    StatTile("Hours > 5", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f), "per day")
                 }
             } else if (ins.count > 0) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1333,7 +1336,7 @@ private fun CheckinsCard(c: Checkins, promptedBased: Boolean) {
                 Caption("${c.typical.n} check-ins", Modifier.padding(start = 4.dp))
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                StatTile("Logged spikes", f(c.spikes), Modifier.fillMaxWidth())
+                StatTile("Spikes", f(c.spikes), Modifier.fillMaxWidth())
                 Caption("${c.spikes.n} logged", Modifier.padding(start = 4.dp))
             }
         }
@@ -1387,9 +1390,9 @@ private fun RecoveryCard(r: Recovery, half: Double, fits: Int, answered: Int, to
             return@SectionCard
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Back near baseline", r.medianMin?.let { fmtHours(it) } ?: "—", Modifier.weight(1f))
+            StatTile("Recovery", r.medianMin?.let { fmtHours(it) } ?: "—", Modifier.weight(1f), "back near baseline")
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                StatTile("Fade half-life", "%.1f h".format(half), Modifier.fillMaxWidth())
+                StatTile("Half-life", "%.1f h".format(half), Modifier.fillMaxWidth(), "fade")
                 Caption(if (fits > 0) "measured" else "estimated", Modifier.padding(start = 4.dp))
             }
             StatTile("Spikes", "${r.episodes}", Modifier.weight(1f))

@@ -32,9 +32,6 @@ class HardSlot(val cover: Int, val above: Int)
  */
 class HardBest(val totalDays: Int, val start: Int, val k: Int, val n: Int, val maxHour: Int)
 
-/** Best window of a profile: first slot [start] and its [mean]. */
-class CurveWindow(val start: Int, val mean: Double)
-
 /** Cause row of the modeled patterns: [hours] attributed to [label] over [days] days, [diff] vs the rest of those days. */
 class CurveCause(val label: String, val hours: Double, val days: Int, val diff: Double)
 
@@ -58,8 +55,6 @@ class CurveModel(
     val hourProfile: List<ProfilePt?>,
     val wakeProfile: List<ProfilePt?>,
     val hoursAbove5: Map<LocalDate, Double>,
-    val hardest: CurveWindow?,
-    val wakeHardest: CurveWindow?,
     val wakes: Map<LocalDate, Int> = emptyMap(),
     val hardShare: List<HardSlot?> = emptyList(),
     val wakeHardShare: List<HardSlot?> = emptyList(),
@@ -155,22 +150,6 @@ private fun hardOf(n: Int, width: Int, days: Map<LocalDate, List<Pair<Int, Doubl
         if (k > bk) { bk = k; bs = s; bn = covers.count { c -> (s until s + width).any { c[it] } } }
     }
     return slots to HardBest(covers.size, bs, bk, bn, slots.maxOf { it?.above ?: 0 })
-}
-
-/** Best [width]-slot window whose mean is >= overall profile mean + 0.5; null when none. */
-private fun hardestOf(profile: List<ProfilePt?>, width: Int): CurveWindow? {
-    val ok = profile.filterNotNull()
-    if (ok.isEmpty()) return null
-    val overall = ok.map { it.mean }.average()
-    var best: CurveWindow? = null
-    for (s in 0..profile.size - width) {
-        val w = profile.subList(s, s + width)
-        if (w.any { it == null }) continue
-        val m = w.map { it!!.mean }.average()
-        val b = best
-        if (m >= overall + 0.5 && (b == null || m > b.mean)) best = CurveWindow(s, m)
-    }
-    return best
 }
 
 /**
@@ -320,7 +299,7 @@ fun buildCurve(entries: List<Entry>, prompts: List<PromptRec> = emptyList()): Cu
     val (hs, hb) = hardOf(24, 3, days, wakes, false)
     val (ws, wb) = hardOf(20, 2, days, wakes, true)
     return CurveModel(base, half, nFits, fromCheckins, days, hourP, wakeP, above,
-        hardestOf(hourP, 3), hardestOf(wakeP, 2), wakes, hs, ws, hb, wb,
+        wakes, hs, ws, hb, wb,
         curvePatterns(ratedByDay, gpts, entries))
 }
 

@@ -7,7 +7,7 @@ entries.txt lines ('|' joined):
   ts|anxiety|caffeine|food|exercise|partner|wakeMin|sleep|causes(;)|medDose|medTime|medUnit|medName|nightSweats|
   alcohol|cannabis|offsetMin|joy|after|tools(;)|source|promptId
 prompts.txt lines: id|scheduledTs|window|status|answeredTs
-Three weeks: manual entries skewed to upset moments (4 bad days), random check-ins (~80% answered, mostly 1-3),
+Three weeks: manual entries skewed to upset moments (5 bad days, 8 peaks; ordinary days 0-2 small logs), random check-ins (~80% answered, mostly 1-3),
 follow-ups that show spikes fading, a couple of recalled entries, wake times, some joy values, tools on some spikes.
 """
 import datetime
@@ -21,7 +21,7 @@ tz = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 random.seed(11)
 
 DAYS = 21
-BAD_BACK = {17, 12, 7, 3}                    # bad days: several 7-8 peaks
+BAD_BACK = {18: 2, 13: 2, 9: 1, 5: 2, 1: 1}   # bad days -> number of 7-8 peaks (8 in all)
 now_ms = int(time.time() * 1000)
 today = (now_ms + tz * 60000) // 86400000    # epoch day on the device
 CUTOFF = now_ms - 90 * 60000                 # nothing in the last 90 min (no open calm card / pending noise)
@@ -84,9 +84,10 @@ for back in range(DAYS - 1, -1, -1):
 
     # --- manual entries, skewed to upset moments ---
     if bad:
-        levels = [5, 7, 8, 6, 7, 8][: random.choice([5, 6])]
+        levels = [random.choice([7, 8]) for _ in range(BAD_BACK[back])] + [random.choice([5, 6]) for _ in range(random.choice([1, 2]))]
+        random.shuffle(levels)
     else:
-        levels = [random.choice([4, 5, 5, 6, 6, 7]) for _ in range(random.choice([1, 2, 2, 3]))]
+        levels = [random.choice([3, 3, 4, 4, 5]) for _ in range(random.choice([0, 1, 1, 2]))]
     n = len(levels)
     mins = sorted(random.sample(range(8, 22), n))
     spikes = []
@@ -143,8 +144,8 @@ for back in range(DAYS - 1, -1, -1):
         pid = "p" + d.strftime("%Y%m%d") + "-" + str(w)
         r = random.random()
         if r < 0.8:
-            base = [2, 2, 2, 3, 3] if w == 0 else [2, 3, 3, 4] if w == 1 else [1, 2, 2, 3]
-            v = random.choice(base) + (2 if bad else 0) + (1 if prev_mean >= 4.5 and random.random() < 0.3 else 0)
+            base = [2, 2, 2, 3] if w == 0 else [2, 2, 3, 3] if w == 1 else [1, 2, 2, 3]
+            v = random.choice(base) + (2 if bad else 0) + (1 if prev_mean >= 4.5 and random.random() < 0.2 else 0)
             v = clamp(v, 1, 6)
             ats = sts + random.randint(2, 25) * 60000
             prompts.append((pid, sts, w, "answered", ats))
