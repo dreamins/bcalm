@@ -16,6 +16,9 @@ object Store {
     private lateinit var appCtx: Context
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     val entries: StateFlow<List<Entry>> = _entries
+    private lateinit var promptFile: File
+    private val _prompts = MutableStateFlow<List<PromptRec>>(emptyList())
+    val prompts: StateFlow<List<PromptRec>> = _prompts
 
     @Synchronized
     fun init(ctx: Context) {
@@ -25,6 +28,8 @@ object Store {
         prefs = app.getSharedPreferences("draft", Context.MODE_PRIVATE)
         file = File(app.filesDir, "entries.txt")
         _entries.value = readFile()
+        promptFile = File(app.filesDir, "prompts.txt")
+        _prompts.value = readPrompts()
         loadCauses()
         loadMedDose()
         loadCards()
@@ -230,7 +235,7 @@ object Store {
 
     /** Cards and support values for the CSV; defaults (and blanks) are included so a cleared field restores as cleared. */
     fun csvSettings() = CsvSettings(_cards.value, mapOf("crisisLabel" to crisisLabel, "crisisNumber" to crisisNumber,
-        "personLabel" to personLabel, "personNumber" to personNumber, "customStep" to customStep))
+        "personLabel" to personLabel, "personNumber" to personNumber, "customStep" to customStep), _prompts.value)
 
     /**
      * Restores cards and support values from an imported CSV without overwriting local edits:
@@ -285,6 +290,17 @@ object Store {
             }
             if (restoreCauses(list) > 0) changed = true
         }
+        if (s.prompts.isNotEmpty()) {
+            val cur = LinkedHashMap<String, PromptRec>()
+            _prompts.value.forEach { cur[it.id] = it }
+            var pc = false
+            for (fp in s.prompts) {
+                val lp = cur[fp.id]
+                if (lp == null) { cur[fp.id] = fp; pc = true }
+                else if (promptRank(fp.status) > promptRank(lp.status)) { cur[fp.id] = fp.copy(answeredTs = fp.answeredTs ?: lp.answeredTs); pc = true }
+            }
+            if (pc) { _prompts.value = cur.values.sortedBy { it.scheduledTs }; writePrompts(); changed = true }
+        }
         for ((name, c) in s.cards) {
             if (c == CauseCard()) continue
             val key = _causeList.value.firstOrNull { it.equals(name, true) }
@@ -303,6 +319,48 @@ object Store {
         }
         if (supportChanged) { _supportVersion.value += 1; changed = true }
         return changed
+    }
+
+    // ---- prompted check-ins log (prompts.txt: id|scheduledTs|window|status|answeredTs) ----
+    @Synchronized
+    fun upsertPrompt(rec: PromptRec) {
+        _prompts.value = (_prompts.value.filter { it.id != rec.id } + rec).sortedBy { it.scheduledTs }
+        writePrompts()
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    /** Sets the status of prompt [id] (no-op if unknown); [answeredTs] replaces the stored one only when non-null. */
+    @Synchronized
+    fun setPromptStatus(id: String, status: String, answeredTs: Long? = null) {
+        val p = _prompts.value.firstOrNull { it.id == id } ?: return
+        upsertPrompt(p.copy(status = status, answeredTs = answeredTs ?: p.answeredTs))
+    }
+
+    /** Turns "pending" prompts scheduled more than 60 minutes before [now] into "expired". */
+    @Synchronized
+    fun expireStale(now: Long = System.currentTimeMillis()) {
+        if (_prompts.value.none { it.status == PROMPT_PENDING && now - it.scheduledTs > 60 * 60_000L }) return
+        _prompts.value = _prompts.value.map {
+            if (it.status == PROMPT_PENDING && now - it.scheduledTs > 60 * 60_000L) it.copy(status = PROMPT_EXPIRED) else it
+        }
+        writePrompts()
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    private fun writePrompts() {
+        val tmp = File(promptFile.parentFile, "prompts.tmp")
+        tmp.writeText(_prompts.value.joinToString("\n") { listOf(it.id, it.scheduledTs, it.window, it.status, it.answeredTs ?: "").joinToString("|") })
+        tmp.renameTo(promptFile)
+    }
+
+    private fun readPrompts(): List<PromptRec> {
+        if (!promptFile.exists()) return emptyList()
+        return promptFile.readLines().mapNotNull { line ->
+            val p = line.split("|")
+            if (p.size < 4 || p[0].isBlank()) return@mapNotNull null
+            PromptRec(p[0], p[1].toLongOrNull() ?: return@mapNotNull null, p[2].toIntOrNull() ?: return@mapNotNull null,
+                p[3], p.getOrNull(4)?.toLongOrNull())
+        }.sortedBy { it.scheduledTs }
     }
 
     // ---- calm card dismissals: entry timestamps, trimmed to the last day ----
@@ -398,7 +456,7 @@ object Store {
             listOf(e.ts.toString(), n(e.anxiety), bb(e.caffeine), bb(e.food), bb(e.exercise),
                 n(e.partner), n(e.wakeMin), n(e.sleep), e.causes.joinToString(";"),
                 e.medDose?.let { fmtNum(it) } ?: "", n(e.medTime), e.medUnit ?: "", e.medName ?: "", bb(e.nightSweats), bb(e.alcohol), bb(e.cannabis), n(e.offsetMin), n(e.joy),
-                n(e.after), e.tools.joinToString(";")).joinToString("|")
+                n(e.after), e.tools.joinToString(";"), e.source, e.promptId ?: "").joinToString("|")
         })
         tmp.renameTo(file)
     }
@@ -424,7 +482,9 @@ object Store {
                 p.getOrNull(16)?.let { i(it) } ?: localOffsetMin(ts),
                 p.getOrNull(17)?.let { i(it) }?.takeIf { it in 1..5 },
                 p.getOrNull(18)?.let { i(it) }?.takeIf { it in 1..10 },
-                p.getOrNull(19)?.split(";")?.filter { it.isNotBlank() } ?: emptyList())
+                p.getOrNull(19)?.split(";")?.filter { it.isNotBlank() } ?: emptyList(),
+                if (p.getOrNull(20) == SOURCE_PROMPTED) SOURCE_PROMPTED else SOURCE_MANUAL,
+                p.getOrNull(21)?.takeIf { it.isNotBlank() })
         }.sortedBy { it.ts }
     }
 }

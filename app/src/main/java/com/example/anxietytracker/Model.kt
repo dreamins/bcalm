@@ -58,6 +58,8 @@ data class Entry(
     val joy: Int? = null,         // 1..5, optional: how much a positive moment landed (no carry-over)
     val after: Int? = null,       // 1..10, optional: anxiety re-rated after a coping tool
     val tools: List<String> = emptyList(),   // coping tools used: "card", "breathe", "ground"
+    val source: String = SOURCE_MANUAL,      // SOURCE_MANUAL | SOURCE_PROMPTED
+    val promptId: String? = null,            // PromptRec.id when answered from a prompted check-in
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
     val medLabel: String? get() = medDose?.let { fmtDose(it, medUnit) } ?: medUnit
@@ -78,6 +80,27 @@ data class Entry(
         }
 }
 
+const val SOURCE_MANUAL = "manual"
+const val SOURCE_PROMPTED = "prompted"
+
+fun Entry.isPrompted() = source == SOURCE_PROMPTED
+
+const val PROMPT_PENDING = "pending"
+const val PROMPT_ANSWERED = "answered"
+const val PROMPT_SKIPPED = "skipped"
+const val PROMPT_EXPIRED = "expired"
+
+/** Merge precedence: answered > skipped > expired > pending. */
+fun promptRank(status: String) = when (status) {
+    PROMPT_ANSWERED -> 3; PROMPT_SKIPPED -> 2; PROMPT_EXPIRED -> 1; else -> 0
+}
+
+/** One scheduled check-in prompt; [window] is the 0-based daily window index. */
+data class PromptRec(val id: String, val scheduledTs: Long, val window: Int, val status: String, val answeredTs: Long? = null)
+
+/** e.g. promptId(2026-10-29, 1) = "p20261029-1". */
+fun promptId(date: LocalDate, window: Int) = "p" + date.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + window
+
 /** Per-cause calm card: a thought, one small step, and whether to offer support options. */
 data class CauseCard(val thought: String = "", val todo: String = "", val heavy: Boolean = false)
 
@@ -85,7 +108,8 @@ data class CauseCard(val thought: String = "", val todo: String = "", val heavy:
 val SUPPORT_KEYS = listOf("crisisLabel", "crisisNumber", "personLabel", "personNumber", "customStep")
 
 /** Calm cards and support contacts, carried in the CSV as '#' rows after the entries. */
-data class CsvSettings(val cards: Map<String, CauseCard> = emptyMap(), val support: Map<String, String> = emptyMap())
+data class CsvSettings(val cards: Map<String, CauseCard> = emptyMap(), val support: Map<String, String> = emptyMap(),
+                       val prompts: List<PromptRec> = emptyList())
 
 /** UTC offset in minutes of the device zone at [ts]. */
 fun localOffsetMin(ts: Long): Int =
@@ -154,7 +178,7 @@ object Csv {
     private val d = DateTimeFormatter.ISO_LOCAL_DATE
     private val t = DateTimeFormatter.ofPattern("HH:mm:ss")
     const val HEADER =
-        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy,after,tools"
+        "timestamp,date,time,anxiety,caffeine,food_3h,exercise_today,partner,wake_time,sleep_quality,med_dose,med_time,causes,med_unit,med_name,night_sweats,alcohol,cannabis,utc_offset,joy,after,tools,source,prompt_id"
 
     private fun b(v: Boolean?) = when (v) { true -> "1"; false -> "0"; null -> "" }
 
@@ -181,8 +205,13 @@ object Csv {
                 e.joy?.toString() ?: "",
                 e.after?.toString() ?: "",
                 e.tools.joinToString(";"),
+                e.source, e.promptId?.replace(",", " ") ?: "",
             ).joinToString(","))
             append('\n')
+        }
+        for (p in settings.prompts.sortedBy { it.scheduledTs }) {
+            val at = Instant.ofEpochMilli(p.scheduledTs).atZone(ZoneId.systemDefault()).toOffsetDateTime().withNano(0)
+            append("#prompt,${p.id.replace(",", " ")},${at.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)},${p.status},${p.window}\n")
         }
         for ((name, c) in settings.cards)
             append("#card,${enc(name)},${enc(c.thought)},${enc(c.todo)},${if (c.heavy) "1" else "0"}\n")
@@ -240,6 +269,7 @@ object Csv {
     fun parseSettings(text: String): CsvSettings {
         val cards = LinkedHashMap<String, CauseCard>()
         val support = LinkedHashMap<String, String>()
+        val prompts = LinkedHashMap<String, PromptRec>()
         for (line in text.removePrefix("\uFEFF").lines().map { it.trim() }) {
             if (!line.startsWith("#")) continue
             val f = splitHash(line)
@@ -249,10 +279,20 @@ object Csv {
                     val name = v(1).trim()
                     if (name.isNotEmpty()) cards[name] = CauseCard(v(2), v(3), f.getOrNull(4)?.first?.trim() == "1")
                 }
+                "#prompt" -> if (f.size >= 5) {
+                    val id = f[1].first
+                    val ts = try { java.time.OffsetDateTime.parse(f[2].first).toInstant().toEpochMilli() } catch (e: Exception) { null }
+                    val w = f[4].first.toIntOrNull()
+                    val st = f[3].first.lowercase()
+                    if (id.isNotEmpty() && ts != null && w != null && st in listOf(PROMPT_PENDING, PROMPT_ANSWERED, PROMPT_SKIPPED, PROMPT_EXPIRED)) {
+                        val old = prompts[id]
+                        if (old == null || promptRank(st) > promptRank(old.status)) prompts[id] = PromptRec(id, ts, w, st)
+                    }
+                }
                 "#support" -> if (f.size >= 3 && f[1].first in SUPPORT_KEYS) support[f[1].first] = v(2)
             }
         }
-        return CsvSettings(cards, support)
+        return CsvSettings(cards, support, prompts.values.toList())
     }
 
     /** Parses [build] output (any historical column set, matched by header name); null if no timestamp column. */
@@ -283,6 +323,8 @@ object Csv {
                 col("joy")?.toIntOrNull()?.takeIf { it in 1..5 },
                 col("after")?.toIntOrNull()?.takeIf { it in 1..10 },
                 col("tools")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
+                if (col("source")?.lowercase() == SOURCE_PROMPTED) SOURCE_PROMPTED else SOURCE_MANUAL,
+                col("prompt_id"),
             )
         }
         return out

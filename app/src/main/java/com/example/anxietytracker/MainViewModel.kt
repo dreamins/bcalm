@@ -146,7 +146,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-saves the open entry with the current draft + causes (keeps its timestamp and anxiety value). */
     private fun syncActive() {
         val a = liveActive() ?: return
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, a.joy).copy(after = a.after, tools = a.tools))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, a.joy).copy(after = a.after, tools = a.tools, source = a.source, promptId = a.promptId))
     }
 
     /** A non-anxiety change was made: update the open entry, or log a new one without anxiety. */
@@ -186,7 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         Store.saveDraft(d)
         val ts = a?.ts ?: newTs()
         val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts), a?.joy)
-            .copy(after = a?.after, tools = a?.tools ?: emptyList())
+            .copy(after = a?.after, tools = a?.tools ?: emptyList(), source = a?.source ?: SOURCE_MANUAL, promptId = a?.promptId)
         if (a == null) {
             Store.add(e)
             Reminders.cancelNotification(getApplication())
@@ -227,7 +227,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val newJoy = if (a.joy == n) null else n
-        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, newJoy).copy(after = a.after, tools = a.tools))
+        commit(Store.entryFrom(_draft.value.copy(anxiety = a.anxiety), orderedCauses(), a.ts, a.offsetMin, newJoy).copy(after = a.after, tools = a.tools, source = a.source, promptId = a.promptId))
         return LogResult(if (newJoy == null) "Joy cleared" else "Joy set to $newJoy") {
             if (_active.value?.ts == a.ts) commit(a)
         }
