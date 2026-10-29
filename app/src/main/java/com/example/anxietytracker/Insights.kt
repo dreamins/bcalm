@@ -300,12 +300,13 @@ data class Checkins(
     val typical: MeanN, val windows: List<MeanN>, val daily: List<Double?>,
     val spikes: MeanN, val topCauses: List<Pair<String, Int>>,
     val answered: Int, val total: Int, val skippedNearby: MeanN, val hasAny: Boolean,
+    val followAnswered: Int = 0, val followTotal: Int = 0,
 )
 
 fun computeCheckins(all: List<Entry>, prompts: List<PromptRec>, fromMs: Long): Checkins {
     val inRange = all.filter { it.ts >= fromMs && it.anxiety != null }
     val prompted = inRange.filter { it.isPrompted() }
-    val manual = inRange.filter { !it.isPrompted() }
+    val manual = inRange.filter { it.isManual() }
     fun mn(l: List<Entry>) = MeanN(l.size, if (l.isEmpty()) null else l.map { it.anxiety!! }.average())
     val byId = prompts.associateBy { it.id }
     val win = prompted.groupBy { e ->
@@ -316,13 +317,16 @@ fun computeCheckins(all: List<Entry>, prompts: List<PromptRec>, fromMs: Long): C
     val daily = (6 downTo 0).map { k -> byDay[today.minusDays(k.toLong())]?.map { it.anxiety!! }?.average() }
     val causes = manual.flatMap { it.causes.distinct() }.groupingBy { it }.eachCount().entries
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).take(3).map { it.key to it.value }
-    val resolved = prompts.filter { it.scheduledTs >= fromMs && it.status != PROMPT_PENDING }
+    val random = prompts.filter { !it.isFollowup() }
+    val fu = prompts.filter { it.isFollowup() && it.scheduledTs >= fromMs && it.status != PROMPT_PENDING }
+    val resolved = random.filter { it.scheduledTs >= fromMs && it.status != PROMPT_PENDING }
     val near = resolved.filter { it.status == PROMPT_SKIPPED || it.status == PROMPT_EXPIRED }.mapNotNull { p ->
-        all.filter { !it.isPrompted() && it.anxiety != null && abs(it.ts - p.scheduledTs) <= 2 * 3_600_000L }
+        all.filter { it.isManual() && it.anxiety != null && abs(it.ts - p.scheduledTs) <= 2 * 3_600_000L }
             .minByOrNull { abs(it.ts - p.scheduledTs) }?.anxiety
     }
     return Checkins(mn(prompted), (0..2).map { mn(win[it].orEmpty()) }, daily, mn(manual), causes,
         resolved.count { it.status == PROMPT_ANSWERED }, resolved.size,
         MeanN(near.size, if (near.isEmpty()) null else near.average()),
-        prompts.any { it.scheduledTs >= fromMs } || prompted.isNotEmpty())
+        random.any { it.scheduledTs >= fromMs } || prompted.isNotEmpty(),
+        fu.count { it.status == PROMPT_ANSWERED }, fu.size)
 }

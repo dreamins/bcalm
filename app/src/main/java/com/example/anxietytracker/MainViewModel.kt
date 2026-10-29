@@ -185,10 +185,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val ts = a?.ts ?: newTs()
         val e = Store.entryFrom(d, orderedCauses(), ts, if (a != null) a.offsetMin else localOffsetMin(ts), a?.joy)
             .copy(after = a?.after, tools = a?.tools ?: emptyList(), source = a?.source ?: SOURCE_MANUAL, promptId = a?.promptId)
+        val spike = e.isManual() && n >= 5 && (a?.anxiety ?: 0) < 5   // starts a follow-up series (manual entries only)
         if (a == null) {
             Store.add(e)
             arm(e)
+            if (spike) Prompts.startFollowups(getApplication(), e)
             return LogResult("Logged $n") {
+                if (spike) Prompts.cancelFollowups(getApplication(), e)
                 Store.delete(e)
                 expireJob?.cancel()
                 expireJob = null
@@ -197,7 +200,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         commit(e)
+        if (spike) Prompts.startFollowups(getApplication(), e)
         return LogResult(if (a.anxiety == null) "Logged $n" else "Updated to $n") {
+            if (spike) Prompts.cancelFollowups(getApplication(), e)
             if (_active.value?.ts == a.ts) commit(a)
             restoreDraft(prevDraft)
         }
@@ -215,10 +220,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _draft.value = d
         Store.saveDraft(d)
         _causes.value = emptySet()
-        val e = Store.entryFrom(d, emptyList(), newTs()).copy(source = SOURCE_PROMPTED, promptId = id)
+        val fu = p.isFollowup()
+        val e = Store.entryFrom(d, emptyList(), newTs()).copy(source = if (fu) SOURCE_FOLLOWUP else SOURCE_PROMPTED, promptId = id)
         Store.add(e)
         Store.setPromptStatus(id, PROMPT_ANSWERED, System.currentTimeMillis())
         Prompts.cancelNotification(getApplication(), p.window)
+        // Back near baseline: the rest of this follow-up series is no longer needed.
+        if (fu && n <= currentBaseline(Store.entries.value).at(e.minuteOfDay().toDouble()) + 1.0) Prompts.endSeries(getApplication(), id)
         arm(e)
         return e
     }

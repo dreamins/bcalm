@@ -85,6 +85,9 @@ object Store {
     var promptsPausedUntil: Long
         get() = prefs.getLong("promptsPausedUntil", 0L)
         set(v) { prefs.edit().putLong("promptsPausedUntil", v).apply() }
+    var followupsOn: Boolean
+        get() = prefs.getBoolean("followupsOn", true)
+        set(v) { prefs.edit().putBoolean("followupsOn", v).apply() }
     var promptsMigrated: Boolean
         get() = prefs.getBoolean("promptsMigrated", false)
         set(v) { prefs.edit().putBoolean("promptsMigrated", v).apply() }
@@ -465,6 +468,7 @@ object Store {
         val ts = maxOf(System.currentTimeMillis(), (_entries.value.lastOrNull()?.ts ?: 0L) + 1)
         val e = entryFrom(d, emptyList(), ts)
         add(e)   // persists, enqueues CsvSync and refreshes the widget
+        if (n >= 5) Prompts.startFollowups(ctx, e)
         return e
     }
 
@@ -505,7 +509,7 @@ object Store {
                 p.getOrNull(17)?.let { i(it) }?.takeIf { it in 1..5 },
                 p.getOrNull(18)?.let { i(it) }?.takeIf { it in 1..10 },
                 p.getOrNull(19)?.split(";")?.filter { it.isNotBlank() } ?: emptyList(),
-                if (p.getOrNull(20) == SOURCE_PROMPTED) SOURCE_PROMPTED else SOURCE_MANUAL,
+                parseSource(p.getOrNull(20)),
                 p.getOrNull(21)?.takeIf { it.isNotBlank() })
         }.sortedBy { it.ts }
     }

@@ -58,7 +58,7 @@ data class Entry(
     val joy: Int? = null,         // 1..5, optional: how much a positive moment landed (no carry-over)
     val after: Int? = null,       // 1..10, optional: anxiety re-rated after a coping tool
     val tools: List<String> = emptyList(),   // coping tools used: "card", "breathe", "ground"
-    val source: String = SOURCE_MANUAL,      // SOURCE_MANUAL | SOURCE_PROMPTED
+    val source: String = SOURCE_MANUAL,      // SOURCE_MANUAL | SOURCE_PROMPTED | SOURCE_FOLLOWUP
     val promptId: String? = null,            // PromptRec.id when answered from a prompted check-in
 ) {
     /** e.g. "5 mg"; null when no dose was recorded. */
@@ -82,8 +82,17 @@ data class Entry(
 
 const val SOURCE_MANUAL = "manual"
 const val SOURCE_PROMPTED = "prompted"
+const val SOURCE_FOLLOWUP = "followup"
 
 fun Entry.isPrompted() = source == SOURCE_PROMPTED
+fun Entry.isFollowup() = source == SOURCE_FOLLOWUP
+/** Logged by the user (not a random check-in, not a follow-up). */
+fun Entry.isManual() = source == SOURCE_MANUAL
+
+/** Stored/CSV source text -> known source; anything else (or null) is manual. */
+fun parseSource(s: String?): String = when (s?.trim()?.lowercase()) {
+    SOURCE_PROMPTED -> SOURCE_PROMPTED; SOURCE_FOLLOWUP -> SOURCE_FOLLOWUP; else -> SOURCE_MANUAL
+}
 
 const val PROMPT_PENDING = "pending"
 const val PROMPT_ANSWERED = "answered"
@@ -97,6 +106,13 @@ fun promptRank(status: String) = when (status) {
 
 /** One scheduled check-in prompt; [window] is the 0-based daily window index. */
 data class PromptRec(val id: String, val scheduledTs: Long, val window: Int, val status: String, val answeredTs: Long? = null)
+
+/** Follow-up prompts have window >= 10 (10 + k); random check-ins use windows 0..2. */
+const val FOLLOWUP_WINDOW = 10
+fun PromptRec.isFollowup() = window >= 3
+
+/** Follow-up id: "f" + local yyyyMMddHHmm of the spike + "-" + k, e.g. "f202610291430-1". */
+fun followupId(spike: LocalDateTime, k: Int) = "f" + spike.format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")) + "-" + k
 
 /** e.g. promptId(2026-10-29, 1) = "p20261029-1". */
 fun promptId(date: LocalDate, window: Int) = "p" + date.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + window
@@ -323,7 +339,7 @@ object Csv {
                 col("joy")?.toIntOrNull()?.takeIf { it in 1..5 },
                 col("after")?.toIntOrNull()?.takeIf { it in 1..10 },
                 col("tools")?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
-                if (col("source")?.lowercase() == SOURCE_PROMPTED) SOURCE_PROMPTED else SOURCE_MANUAL,
+                parseSource(col("source")),
                 col("prompt_id"),
             )
         }

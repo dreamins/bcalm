@@ -25,6 +25,10 @@ import kotlin.random.Random
 object Prompts {
     private const val CHANNEL = "check-ins"
     private const val NOTIF_BASE = 100          // + window
+    private const val NOTIF_FOLLOWUP = 110      // all follow-ups share one notification
+    val FOLLOWUP_MIN = listOf(30, 90, 240)      // minutes after the spike
+    private const val FOLLOW_FROM = 7 * 60      // follow-ups only between 07:00 and 22:30 local
+    private const val FOLLOW_TO = 22 * 60 + 30
     const val ACTION_FIRE = "com.example.anxietytracker.PROMPT_FIRE"
     const val ACTION_SKIP = "com.example.anxietytracker.PROMPT_SKIP"
     const val EXTRA_ID = "prompt_id"
@@ -65,7 +69,8 @@ object Prompts {
         Store.expireStale(now)
         val on = Store.promptsOn
         for (p in Store.prompts.value) {
-            if (p.status == PROMPT_PENDING && p.scheduledTs > now && (!on || reroll || isPaused(dateOf(p)))) {
+            val drop = if (p.isFollowup()) !Store.followupsOn || isPaused(dateOf(p)) else !on || reroll || isPaused(dateOf(p))
+            if (p.status == PROMPT_PENDING && p.scheduledTs > now && drop) {
                 cancelAlarm(ctx, p.id)
                 Store.removePrompt(p.id)
             }
@@ -104,7 +109,53 @@ object Prompts {
         p.cancel()
     }
 
-    fun cancelNotification(ctx: Context, window: Int) = NotificationManagerCompat.from(ctx).cancel(NOTIF_BASE + window)
+    fun cancelNotification(ctx: Context, window: Int) =
+        NotificationManagerCompat.from(ctx).cancel(if (window >= WINDOWS) NOTIF_FOLLOWUP else NOTIF_BASE + window)
+
+    /** Series id of a follow-up id: "f202610291430-1" -> "f202610291430". */
+    fun seriesOf(id: String) = id.substringBeforeLast("-")
+
+    /** Removes still-pending follow-ups (alarm, record, notification) except those of series [keep]; [only] limits to one series. */
+    private fun dropFollowups(ctx: Context, keep: String? = null, only: String? = null, exceptId: String? = null) {
+        for (p in Store.prompts.value) {
+            if (!p.isFollowup() || p.status != PROMPT_PENDING || p.id == exceptId) continue
+            val s = seriesOf(p.id)
+            if (s == keep || (only != null && s != only)) continue
+            cancelAlarm(ctx, p.id)
+            Store.removePrompt(p.id)
+            cancelNotification(ctx, p.window)
+        }
+    }
+
+    /**
+     * A manual entry [spike] with anxiety >= 5 was saved: drops pending follow-ups of earlier series and schedules
+     * follow-ups at +30/+90/+240 min, skipping times outside 07:00-22:30, on paused days or already in the past.
+     */
+    fun startFollowups(ctx: Context, spike: Entry, now: Long = System.currentTimeMillis()) {
+        Store.init(ctx)
+        if (!Store.followupsOn || !spike.isManual() || (spike.anxiety ?: 0) < 5) return
+        val sid = seriesOf(followupId(spike.dateTime, 0))
+        dropFollowups(ctx, keep = sid)
+        FOLLOWUP_MIN.forEachIndexed { k, min ->
+            val id = followupId(spike.dateTime, k)
+            val ts = spike.ts + min * 60_000L
+            val dt = java.time.Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault())
+            val m = dt.hour * 60 + dt.minute
+            if (ts <= now || m < FOLLOW_FROM || m > FOLLOW_TO || isPaused(dt.toLocalDate()) ||
+                Store.prompts.value.any { it.id == id }) return@forEachIndexed
+            Store.upsertPrompt(PromptRec(id, ts, FOLLOWUP_WINDOW + k, PROMPT_PENDING))
+        }
+        plan(ctx)
+    }
+
+    /** Removes the pending follow-ups of the series started by [spike] (e.g. its log was undone). */
+    fun cancelFollowups(ctx: Context, spike: Entry) {
+        Store.init(ctx)
+        dropFollowups(ctx, only = seriesOf(followupId(spike.dateTime, 0)))
+    }
+
+    /** A follow-up [id] was answered near baseline: removes the rest of its series. */
+    fun endSeries(ctx: Context, id: String) = dropFollowups(ctx, only = seriesOf(id), exceptId = id)
 
     /** Alarm fired for prompt [id]: notify if it is still pending and prompts are allowed, then plan ahead. */
     fun fire(ctx: Context, id: String) {
@@ -112,7 +163,7 @@ object Prompts {
         val now = System.currentTimeMillis()
         Store.expireStale(now)
         val p = Store.prompts.value.firstOrNull { it.id == id }
-        if (p != null && p.status == PROMPT_PENDING && Store.promptsOn && !isPaused(dateOf(p)) &&
+        if (p != null && p.status == PROMPT_PENDING && (if (p.isFollowup()) Store.followupsOn else Store.promptsOn) && !isPaused(dateOf(p)) &&
             now - p.scheduledTs < VALID_MS && canNotify(ctx)) show(ctx, p, now)
         plan(ctx)
     }
@@ -126,10 +177,11 @@ object Prompts {
             Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(EXTRA_ID, p.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val fu = p.isFollowup()
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle("How's your anxiety right now?")
-            .setContentText("Tap to rate 1–10. Takes a second.")
+            .setContentTitle(if (fu) "Checking back in" else "How's your anxiety right now?")
+            .setContentText(if (fu) "How is it now? One tap." else "Tap to rate 1–10. Takes a second.")
             .setContentIntent(open)
             .setAutoCancel(true)
             .setTimeoutAfter((VALID_MS - (now - p.scheduledTs)).coerceAtLeast(60_000L))
@@ -137,7 +189,7 @@ object Prompts {
             .setDeleteIntent(pi(ctx, p.id, ACTION_SKIP))
             .addAction(0, "Not now", pi(ctx, p.id, ACTION_SKIP))
             .build()
-        nm.notify(NOTIF_BASE + p.window, n)
+        nm.notify(if (fu) NOTIF_FOLLOWUP else NOTIF_BASE + p.window, n)
     }
 
     /** "Not now" or swipe-away: a still-pending prompt becomes skipped. */

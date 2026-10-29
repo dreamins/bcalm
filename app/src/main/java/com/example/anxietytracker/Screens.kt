@@ -127,7 +127,7 @@ fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0, prom
         onPromptDone()
     }
     promptOpen?.let { id ->
-        PromptSheet(onClose = { promptOpen = null }) { n, details ->
+        PromptSheet(onClose = { promptOpen = null }, title = if (id.startsWith("f")) "How is it now?" else "How's your anxiety right now?") { n, details ->
             promptOpen = null
             if (vm.answerPrompt(id, n) != null) {
                 if (details) tab = 0
@@ -377,14 +377,14 @@ private val YES_NO = listOf("Yes", "No")
 /** One-tap check-in sheet: tapping a number saves it; "Add details" first makes the save open the Log tab on that entry. */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun PromptSheet(onClose: () -> Unit, onPick: (Int, Boolean) -> Unit) {
+private fun PromptSheet(onClose: () -> Unit, title: String = "How's your anxiety right now?", onPick: (Int, Boolean) -> Unit) {
     val t = MaterialTheme.bcalm
     val haptic = LocalHapticFeedback.current
     var details by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.card) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("How's your anxiety right now?", style = MaterialTheme.typography.titleLarge)
+            Text(title, style = MaterialTheme.typography.titleLarge)
             ScaleRow(10, null, height = 46.dp, gap = 4.dp, allowClear = false) { i ->
                 if (i != null) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPick(i + 1, details) }
             }
@@ -1044,6 +1044,7 @@ fun ChartScreen(vm: MainViewModel) {
     var view by remember { mutableIntStateOf(Store.chartView) }
     var modeled by remember { mutableStateOf(Store.chartModeled) }
     val curve = remember(all, range) { buildCurve(all.filter { it.ts >= cutoff }) }
+    val recovery = remember(all, range) { computeRecovery(all.filter { it.ts >= cutoff }, curve) }
     val rangeRated = remember(all, range) { all.filter { it.anxiety != null && it.ts >= cutoff } }
     val showModeled = modeled && view != 2
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -1129,6 +1130,7 @@ fun ChartScreen(vm: MainViewModel) {
         }
 
         CheckinsCard(checkins, promptedBased)
+        RecoveryCard(recovery, curve.halfLife, curve.halfLifeFits, checkins.followAnswered, checkins.followTotal)
 
         if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
             SectionCard(spacing = 0.dp) {
@@ -1253,6 +1255,73 @@ private fun CheckinsCard(c: Checkins, promptedBased: Boolean) {
             if (sk.n >= 2 && sk.mean != null && tm != null && sk.mean - tm >= 1.0)
                 Caption("Around skipped check-ins you logged %.1f on average — skipped ones may have been harder moments.".format(sk.mean))
         }
+    }
+}
+
+private fun fmtHours(min: Double) = "%.1f h".format(min / 60.0)
+
+@Composable
+private fun RecoveryCard(r: Recovery, half: Double, fits: Int, answered: Int, total: Int) {
+    SectionCard {
+        CardHeader("Recovery")
+        if (r.episodes < 3) {
+            Caption("After a few hard moments with follow-ups, this shows how fast they fade.")
+            return@SectionCard
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("Back near baseline", r.medianMin?.let { fmtHours(it) } ?: "—", Modifier.weight(1f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatTile("Fade half-life", "%.1f h".format(half), Modifier.fillMaxWidth())
+                Caption(if (fits > 0) "measured" else "estimated", Modifier.padding(start = 4.dp))
+            }
+            StatTile("Spikes", "${r.episodes}", Modifier.weight(1f))
+        }
+        if (r.censored > 0) Caption("${r.censored} of ${r.episodes} spikes were not rated back near baseline within 6 h.")
+        RecoveryChart(r, half, Modifier.fillMaxWidth().height(140.dp))
+        Caption("Line: modeled fade from a typical spike. Dots: how you actually rated after each spike.")
+        if (total > 0) Caption("Answered $answered of $total follow-ups.")
+        if (r.weekly.size >= 2) {
+            val f = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+            Caption("Fade half-life by week: " + r.weekly.joinToString(" · ") { "${it.first.format(f)} ${"%.1f".format(it.second)} h" })
+        }
+        if (r.withTool != null && r.without != null)
+            Caption("With a coping tool: back near baseline in ${fmtHours(r.withTool)}; without: ${fmtHours(r.without)}.")
+    }
+}
+
+/** x = hours since the spike (0..6), y = 1..10: modeled fade from the typical spike to the typical baseline, plus every rating after a spike. */
+@Composable
+private fun RecoveryChart(r: Recovery, half: Double, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val t = MaterialTheme.bcalm
+    val grid = t.innerDivider
+    val dot = t.secondary.copy(alpha = 0.35f)
+    val dotF = t.secondary.copy(alpha = 0.75f)
+    val accent = t.accent
+    Canvas(modifier) {
+        val l = 28.dp.toPx(); val b = 24.dp.toPx(); val top0 = 8.dp.toPx(); val rr = 8.dp.toPx()
+        val w = size.width - l - rr; val h = size.height - top0 - b
+        fun x(hr: Float) = l + w * hr / 6f
+        fun y(a: Float) = top0 + h * (1 - a / 10f)
+        val style = TextStyle(color = t.secondary, fontSize = 10.sp)
+        for (a in listOf(1, 5, 10)) {
+            if (a > 1) drawLine(grid, Offset(l, y(a.toFloat())), Offset(l + w, y(a.toFloat())), 1.dp.toPx())
+            val m = measurer.measure("$a", style)
+            drawText(m, topLeft = Offset(l - m.size.width - 6.dp.toPx(), y(a.toFloat()) - m.size.height / 2f))
+        }
+        for (hr in 0..6) {
+            val m = measurer.measure("${hr}h", style)
+            drawText(m, topLeft = Offset((x(hr.toFloat()) - m.size.width / 2f).coerceIn(l - 4.dp.toPx(), size.width - m.size.width.toFloat()), top0 + h + 6.dp.toPx()))
+        }
+        val line = Path()
+        for (i in 0..60) {
+            val hr = i / 10f
+            val v = (r.baseMedian + (r.spikeMedian - r.baseMedian) * Math.pow(2.0, -hr / half)).toFloat().coerceIn(1f, 10f)
+            if (i == 0) line.moveTo(x(hr), y(v)) else line.lineTo(x(hr), y(v))
+        }
+        drawPath(line, accent, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        r.obs.forEach { o -> drawCircle(if (o.followup) dotF else dot, 2.dp.toPx(), Offset(x(o.hours.coerceIn(0f, 6f)), y(o.value.coerceIn(1, 10).toFloat()))) }
+        drawLine(t.cardBorder, Offset(l, y(0f)), Offset(l + w, y(0f)), 1.dp.toPx())
     }
 }
 
@@ -1683,7 +1752,7 @@ fun HistoryScreen(vm: MainViewModel, snack: SnackbarHostState) {
                                     style = MaterialTheme.typography.titleLarge, fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold)
                                 Column(Modifier.weight(1f)) {
-                                    Text(e.dateTime.format(timeFmt) + if (e.isPrompted()) "  · check-in" else "",
+                                    Text(e.dateTime.format(timeFmt) + if (e.isPrompted()) "  · check-in" else if (e.isFollowup()) "  · follow-up" else "",
                                         style = MaterialTheme.typography.bodyLarge)
                                     val detail = detailLine(e)
                                     if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall,
@@ -1714,6 +1783,7 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var promptsOn by remember { mutableStateOf(Store.promptsOn) }
+    var followOn by remember { mutableStateOf(Store.followupsOn) }
     var pausedUntil by remember { mutableLongStateOf(Store.promptsPausedUntil) }
     val windows = remember { mutableStateListOf(*Array(Prompts.WINDOWS) { Store.promptWindow(it) }) }
     var editWin by remember { mutableStateOf<Int?>(null) }
@@ -1780,6 +1850,14 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                     Prompts.plan(ctx)
                 })
             }
+            LabeledRow("Follow up after hard moments") {
+                Switch(checked = followOn, onCheckedChange = { v ->
+                    followOn = v; Store.followupsOn = v
+                    if (v && Build.VERSION.SDK_INT >= 33 && !Prompts.canNotify(ctx)) notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    Prompts.plan(ctx)
+                })
+            }
+            Caption("After you log 5 or more, a few quick check-backs (30 min, 1.5 h, 4 h) to see how it fades. Stops once you're back near baseline.")
             if (promptsOn) {
                 for (w in 0 until Prompts.WINDOWS) {
                     val (ws, we) = windows[w]
