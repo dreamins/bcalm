@@ -1044,7 +1044,7 @@ fun ChartScreen(vm: MainViewModel) {
     val ranges = listOf(7, 30, 0)
     var view by remember { mutableIntStateOf(Store.chartView) }
     var modeled by remember { mutableStateOf(Store.chartModeled) }
-    val curve = remember(all, range) { buildCurve(all.filter { it.ts >= cutoff }) }
+    val curve = remember(all, prompts, range) { buildCurve(all.filter { it.ts >= cutoff }, prompts.filter { it.scheduledTs >= cutoff }) }
     val recovery = remember(all, range) { computeRecovery(all.filter { it.ts >= cutoff }, curve) }
     val rangeRated = remember(all, range) { all.filter { it.anxiety != null && it.ts >= cutoff } }
     val showModeled = modeled
@@ -1084,7 +1084,6 @@ fun ChartScreen(vm: MainViewModel) {
             if (showModeled) {
                 if (curve.days.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     curve.timeWeightedMean?.let { StatTile("Average", "%.1f".format(it), Modifier.weight(1f), "time-weighted") }
-                    StatTile("Baseline", "%.1f".format(curve.baseline.at(720.0)), Modifier.weight(1f))
                     if (view != 2 && cw != null && cLabel != null) StatTile(cLabel, "%.1f".format(cw.mean), Modifier.weight(1f))
                     StatTile("Hours > 5 / day", "%.1f".format(curve.hoursAbove5.values.average()), Modifier.weight(1f))
                 }
@@ -1125,10 +1124,10 @@ fun ChartScreen(vm: MainViewModel) {
                 Caption("Modeled hours spent above 5 each day.")
             }
             if (showModeled) {
-                Caption("Modeled: between ratings, anxiety fades back toward your baseline (half-life %.1f h, %s). Band shows how much days differ; dots are your ratings.".format(
+                Caption("Baseline %.1f. ".format(curve.baseline.at(720.0)) + "Modeled: between ratings, anxiety fades back toward your baseline (half-life %.1f h, %s). Band shows how much days differ; dots are your ratings.".format(
                     curve.halfLife, if (curve.halfLifeFits > 0) "measured from ${curve.halfLifeFits} fades" else "estimated") +
-                    if (curve.baselineFromCheckins) " Baseline from check-ins."
-                    else " Baseline from your logs — check-ins will make it more accurate.")
+                    if (curve.baselineFromCheckins) ""
+                    else " Baseline estimated from your logs — likely too high until you have a few check-ins.")
             } else if (promptedBased) Caption("Based on check-ins (your typical day).")
             else if (Store.promptsOn || all.any { it.ts >= cutoff && it.isPrompted() })
                 Caption("Based mostly on entries you logged yourself — these show spikes more than your baseline.")
@@ -1137,19 +1136,25 @@ fun ChartScreen(vm: MainViewModel) {
         CheckinsCard(checkins, promptedBased)
         RecoveryCard(recovery, curve.halfLife, curve.halfLifeFits, checkins.followAnswered, checkins.followTotal)
 
-        if (ins.causes.isNotEmpty() || ins.factors.isNotEmpty() || ins.otherCauses > 0) {
+        val cp = curve.patterns
+        val pCauses = if (showModeled) cp.causes.map { Triple(it.label, "%.1f h · %s".format(it.hours, if (it.days == 1) "1 day" else "${it.days} days"), it.diff) }
+            else ins.causes.map { Triple(it.label, if (it.days == 1) "1 day" else "${it.days} days", it.diff) }
+        val pFactors = if (showModeled) cp.factors else ins.factors
+        val pOther = if (showModeled) cp.otherCauses else ins.otherCauses
+        if (pCauses.isNotEmpty() || pFactors.isNotEmpty() || pOther > 0) {
             SectionCard(spacing = 0.dp) {
                 CardHeader("Patterns")
                 Spacer(Modifier.height(6.dp))
-                val rows: List<Triple<String, String?, Double>> = ins.causes.map { Triple(it.label, if (it.days == 1) "1 day" else "${it.days} days", it.diff) } +
-                    ins.factors.map { Triple(it.label, null as String?, it.diff) }
+                val rows: List<Triple<String, String?, Double>> = pCauses.map { Triple(it.first, it.second as String?, it.third) } +
+                    pFactors.map { Triple(it.label, null as String?, it.diff) }
                 rows.forEachIndexed { i, r -> PatternRow(r.first, r.second, r.third, divider = i < rows.lastIndex) }
-                if (ins.otherCauses > 0) {
-                    Caption(if (ins.otherCauses == 1) "1 other cause on too few days"
-                            else "${ins.otherCauses} other causes on too few days",
+                if (pOther > 0) {
+                    Caption(if (pOther == 1) "1 other cause on too few days"
+                            else "$pOther other causes on too few days",
                         Modifier.padding(top = 8.dp))
                 }
-                Caption("Causes: average anxiety compared with the rest of the same day, each day counted once. Factors: compared with the opposite case.",
+                Caption(if (showModeled) "From the modeled curve: time attributed to each cause compared with the rest of that day, each day counted once. Factors: time with vs without."
+                        else "Causes: average anxiety compared with the rest of the same day, each day counted once. Factors: compared with the opposite case.",
                     Modifier.padding(top = 6.dp))
             }
         }
