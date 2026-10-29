@@ -7,7 +7,7 @@ import kotlin.math.pow
 /** Grid step of the day curves, in minutes. */
 const val CURVE_STEP = 15
 /** Fade half-life (hours) used until >= 5 fades are measured. */
-const val DEFAULT_HALF_LIFE_H = 3.5
+const val DEFAULT_HALF_LIFE_H = 2.0
 
 /** Piecewise-linear baseline over minute of day (flat beyond the first/last point); one point = constant. */
 class BaselineFn(private val xs: DoubleArray, private val ys: DoubleArray) {
