@@ -14,7 +14,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 
 bcalm is being prepared for Google Play internal testing. Once you are added as a tester, open the opt-in link you are sent, accept the invitation, then install bcalm from the Play Store; updates then arrive through Play. The Play build is signed by Google Play, so it cannot be installed over the sideloaded APK.
 
-**Note on the applicationId change.** The app id is now `io.github.dreamins.bcalm` (it was `app.bcalm` in builds before this change; the Kotlin package is still `com.example.anxietytracker`). A sideloaded install of an older build is a separate app with its own data. To move your history: in the old app, sync (Settings, sync); then in the new app use Settings, sync, "Use existing file…" and pick the same CSV.
+**Play vs. sideloaded installs.** Play installs are separate from sideloaded installs (Play re-signs the app with its own key), so they don't share data. To switch from the sideloaded app to the Play version, move your history via the CSV sync: in the sideloaded app, sync (Settings, sync); then in the Play app use Settings, sync, "Use existing file…" and pick the same CSV.
 
 Privacy policy: [docs/privacy.md](docs/privacy.md) (https://dreamins.github.io/bcalm/privacy.html once GitHub Pages is enabled).
 
