@@ -1044,15 +1044,15 @@ fun ChartScreen(vm: MainViewModel) {
             SectionCard(spacing = 0.dp) {
                 CardHeader("Patterns")
                 Spacer(Modifier.height(6.dp))
-                val rows: List<Triple<String, String?, Double>> = ins.causes.map { Triple(it.label, "${it.n}×", it.diff) } +
+                val rows: List<Triple<String, String?, Double>> = ins.causes.map { Triple(it.label, if (it.days == 1) "1 day" else "${it.days} days", it.diff) } +
                     ins.factors.map { Triple(it.label, null as String?, it.diff) }
                 rows.forEachIndexed { i, r -> PatternRow(r.first, r.second, r.third, divider = i < rows.lastIndex) }
                 if (ins.otherCauses > 0) {
-                    Caption(if (ins.otherCauses == 1) "1 other cause with too few entries"
-                            else "${ins.otherCauses} other causes with too few entries",
+                    Caption(if (ins.otherCauses == 1) "1 other cause on too few days"
+                            else "${ins.otherCauses} other causes on too few days",
                         Modifier.padding(top = 8.dp))
                 }
-                Caption("Differences are in average anxiety, compared with your overall average (causes) or with the opposite case (factors).",
+                Caption("Causes: average anxiety compared with the rest of the same day, each day counted once. Factors: compared with the opposite case.",
                     Modifier.padding(top = 6.dp))
             }
         }

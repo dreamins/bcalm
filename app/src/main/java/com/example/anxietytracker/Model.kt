@@ -73,7 +73,7 @@ data class Entry(
             val w = wakeMin ?: return null
             val dt = dateTime
             var m = dt.hour * 60 + dt.minute - w
-            if (m < 0) m += 1440
+            if (m < -60) m += 1440 else if (m < 0) return 0f
             return (m / 60f).takeIf { it <= 20f }
         }
 }

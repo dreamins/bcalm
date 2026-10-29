@@ -13,7 +13,7 @@ fun percentile(values: List<Int>, p: Double): Double {
 }
 
 /** One comparison row: [diff] is the mean anxiety difference (positive = higher anxiety). */
-data class DiffRow(val label: String, val n: Int, val diff: Double)
+data class DiffRow(val label: String, val n: Int, val diff: Double, val days: Int = 0)
 
 data class Insights(
     val count: Int,
@@ -30,8 +30,11 @@ data class Insights(
     val wakeAvg: Double = 0.0,
 )
 
-/** Hardest window found by [computeInsights]: [start] and [width] in hours, its [label] and mean anxiety [avg]. */
-class HardWindow(val start: Int, val width: Int, val label: String, val avg: Double)
+/**
+ * Hardest window found by [computeInsights]: [start] and [width] in hours, its [label], plain mean anxiety [avg],
+ * [lift] (mean over days of the window's anxiety minus that day's mean) and the number of [days] it rests on.
+ */
+class HardWindow(val start: Int, val width: Int, val label: String, val avg: Double, val lift: Double, val days: Int)
 
 /** Typographic minus (U+2212). */
 const val MINUS = "−"
@@ -65,7 +68,7 @@ fun computeInsights(all: List<Entry>): Insights {
     val n = data.size
     val avg = if (n == 0) 0.0 else data.map { it.anxiety!! }.average()
 
-    val hard = if (n < 10) null else hardestWindow(data, avg, 3, 0..21, { it.dateTime.hour }) { windowLabel(it) }
+    val hard = if (n < 10) null else hardestWindow(data, 3, 0..21, { it.dateTime.hour }) { windowLabel(it) }
     val sentence = if (n < 10) {
         "Log a few more times to see patterns."
     } else {
@@ -75,7 +78,7 @@ fun computeInsights(all: List<Entry>): Insights {
     val wakeData = data.filter { it.hoursSinceWake != null }
     val wakeAvg = if (wakeData.isEmpty()) 0.0 else wakeData.map { it.anxiety!! }.average()
     val wakeHard = if (wakeData.size < 10) null else
-        hardestWindow(wakeData, wakeAvg, 2, 0..18, { it.hoursSinceWake!!.toInt() }) {
+        hardestWindow(wakeData, 2, 0..18, { it.hoursSinceWake!!.toInt() }) {
             "$it–${it + 2} h after you wake up"
         }
     val wakeSentence = if (wakeData.size < 10) {
@@ -84,12 +87,15 @@ fun computeInsights(all: List<Entry>): Insights {
         wakeHard?.let { "Relative to waking, it's usually hardest ${it.text(wakeAvg)}" } ?: "No time since waking stands out yet."
     }
 
-    val byCause = data.flatMap { e -> e.causes.distinct().map { it to e.anxiety!! } }
-        .groupBy({ it.first }, { it.second })
-    val causes = byCause.filter { it.value.size >= 3 }
-        .map { DiffRow(it.key, it.value.size, it.value.average() - avg) }
-        .sortedByDescending { it.diff }
-    val other = byCause.count { it.value.size < 3 }
+    val dayMean = data.groupBy { it.dateTime.toLocalDate() }.mapValues { e -> e.value.map { it.anxiety!! }.average() }
+    val byCause = data.flatMap { e -> e.causes.distinct().map { it to e } }.groupBy({ it.first }, { it.second })
+    val causeRows = byCause.mapNotNull { (c, es) ->
+        val perDay = es.groupBy { it.dateTime.toLocalDate() }
+            .map { (d, l) -> l.map { it.anxiety!! - dayMean.getValue(d) }.average() }
+        if (perDay.size >= 3) DiffRow(c, es.size, perDay.average(), perDay.size) else null
+    }
+    val causes = causeRows.sortedByDescending { it.diff }
+    val other = byCause.size - causeRows.size
 
     fun vals(p: (Entry) -> Boolean): List<Int> = data.filter(p).map { it.anxiety!! }
     fun cmp(label: String, a: List<Int>, b: List<Int>): DiffRow? =
@@ -232,21 +238,29 @@ fun computeJoyInsights(all: List<Entry>): JoyInsights? {
 private fun HardWindow.text(overall: Double): String =
     "$label (avg ${"%.1f".format(avg)}, vs ${"%.1f".format(overall)} overall)."
 
-/** Best [width]-wide window (start in [starts], by [key]) with >= 5 entries and mean >= 0.3 above [avg], or null. */
+/**
+ * Best [width]-wide window (start in [starts], by [key]): per day the mean of (anxiety - that day's mean) of the
+ * day's entries in the window, scored as the mean over days (each day counts once). Needs entries from >= 4 days
+ * and a score >= 0.5, else null; ties go to more days.
+ */
 private fun hardestWindow(
-    data: List<Entry>, avg: Double, width: Int, starts: IntRange, key: (Entry) -> Int, label: (Int) -> String,
+    data: List<Entry>, width: Int, starts: IntRange, key: (Entry) -> Int, label: (Int) -> String,
 ): HardWindow? {
+    val dayMean = data.groupBy { it.dateTime.toLocalDate() }.mapValues { e -> e.value.map { it.anxiety!! }.average() }
     var bestStart = -1
+    var bestScore = 0.0
+    var bestDays = 0
     var bestAvg = 0.0
-    var bestN = 0
     for (s in starts) {
-        val w = data.filter { key(it) >= s && key(it) < s + width }.map { it.anxiety!! }
-        if (w.size < 5) continue
-        val m = w.average()
-        val better = bestStart < 0 || m > bestAvg + 1e-9 ||
-            (abs(m - bestAvg) <= 1e-9 && w.size > bestN)
-        if (better) { bestStart = s; bestAvg = m; bestN = w.size }
+        val w = data.filter { key(it) >= s && key(it) < s + width }
+        val perDay = w.groupBy { it.dateTime.toLocalDate() }
+            .map { (d, l) -> l.map { it.anxiety!! - dayMean.getValue(d) }.average() }
+        if (perDay.size < 4) continue
+        val score = perDay.average()
+        val better = bestStart < 0 || score > bestScore + 1e-9 ||
+            (abs(score - bestScore) <= 1e-9 && perDay.size > bestDays)
+        if (better) { bestStart = s; bestScore = score; bestDays = perDay.size; bestAvg = w.map { it.anxiety!! }.average() }
     }
-    if (bestStart < 0 || bestAvg - avg < 0.3) return null
-    return HardWindow(bestStart, width, label(bestStart), bestAvg)
+    if (bestStart < 0 || bestScore < 0.5) return null
+    return HardWindow(bestStart, width, label(bestStart), bestAvg, bestScore, bestDays)
 }
