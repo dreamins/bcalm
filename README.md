@@ -14,7 +14,7 @@ Open it on your Android phone. You will need to allow "install unknown apps" for
 
 bcalm is being prepared for Google Play internal testing. Once you are added as a tester, open the opt-in link you are sent, accept the invitation, then install bcalm from the Play Store; updates then arrive through Play. The Play build is signed by Google Play, so it cannot be installed over the sideloaded APK.
 
-**Play vs. sideloaded installs.** Play installs are separate from sideloaded installs (Play re-signs the app with its own key), so they don't share data. To switch from the sideloaded app to the Play version, move your history via the CSV sync: in the sideloaded app, sync (Settings, sync); then in the Play app use Settings, sync, "Use existing file…" and pick the same CSV.
+**Play vs. sideloaded installs.** The Play build is `io.github.dreamins.bcalm`; the sideloaded APK is `app.bcalm`. They are separate apps and can be installed side by side. Play builds have no in-app "Check for updates" (Play handles updates). Play installs are separate from sideloaded installs (Play re-signs the app with its own key), so they don't share data. To switch from the sideloaded app to the Play version, move your history via the CSV sync: in the sideloaded app, sync (Settings, sync); then in the Play app use Settings, sync, "Use existing file…" and pick the same CSV.
 
 Privacy policy: [docs/privacy.md](docs/privacy.md) (https://dreamins.github.io/bcalm/privacy.html once GitHub Pages is enabled).
 
@@ -81,10 +81,10 @@ All data stays on your device unless you export it or turn on sync to a file you
 ## Build
 
 ```
-./gradlew assembleDebug
+./gradlew assembleSideloadDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/`. GitHub Actions ("Build APK") builds every push and publishes the `latest` release from `main`.
+The APK is written to `app/build/outputs/apk/sideload/debug/`. GitHub Actions ("Build APK") builds every push and publishes the `latest` release from `main`.
 
 To refresh the screenshots, run the **Screenshots** workflow from the Actions tab. It boots an emulator, seeds anonymous demo data (`.github/scripts/seed_demo.py`), captures the log, chart (time of day, over time and the cards), history and settings screens and commits the images to `docs/screenshots/`.
 

@@ -31,7 +31,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-          ./gradlew assembleDebug bundleRelease assembleRelease 2>&1 | tee build.log || {
+          ./gradlew assembleSideloadDebug assembleSideloadRelease bundlePlayRelease 2>&1 | tee build.log || {
             # Surface compiler/build errors as annotations
             grep -E '^(e: |\* What went wrong|FAILURE|.*error:)' -A3 build.log | head -60 | while IFS= read -r l; do echo "::error::$l"; done
             exit 1; }
@@ -39,19 +39,19 @@ jobs:
         with:
           name: AnxietyTracker-debug
           path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
+            app/build/outputs/apk/sideload/debug/*.apk
+            app/build/outputs/apk/sideload/release/*.apk
+            app/build/outputs/bundle/playRelease/*.aab
       - name: Publish to "latest" release
         if: github.ref == 'refs/heads/main'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk bcalm.apk
+          cp app/build/outputs/apk/sideload/debug/app-sideload-debug.apk bcalm.apk
           gh release view latest >/dev/null 2>&1 || gh release create latest --title "Latest build" --notes "Debug APK built from main."
           gh release upload latest bcalm.apk --clobber
           # Release outputs are only uploaded when signed (signing secret present).
-          RAPK=app/build/outputs/apk/release/app-release.apk
-          RAAB=app/build/outputs/bundle/release/app-release.aab
+          RAPK=app/build/outputs/apk/sideload/release/app-sideload-release.apk
+          RAAB=app/build/outputs/bundle/playRelease/app-play-release.aab
           if [ -f "$RAPK" ] && [ -f "$RAAB" ]; then
             cp "$RAPK" bcalm-release.apk
             cp "$RAAB" bcalm.aab
@@ -67,7 +67,7 @@ jobs:
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: app.bcalm
-          releaseFiles: app/build/outputs/bundle/release/app-release.aab
+          packageName: io.github.dreamins.bcalm
+          releaseFiles: app/build/outputs/bundle/playRelease/app-play-release.aab
           track: internal
           status: completed

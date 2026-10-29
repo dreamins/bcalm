@@ -9,13 +9,28 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.bcalm"
         minSdk = 26
         targetSdk = 36
         val run = System.getenv("GITHUB_RUN_NUMBER")
         val sha = System.getenv("GITHUB_SHA")?.take(7)
         versionCode = run?.toIntOrNull() ?: 1
         versionName = if (run == null) "1.0-dev" else "1.0.$run" + (sha?.let { "-$it" } ?: "")
+    }
+
+    flavorDimensions += "dist"
+    productFlavors {
+        // Sideloaded APKs (GitHub releases, screenshots): keeps the original id so existing installs update.
+        create("sideload") {
+            dimension = "dist"
+            applicationId = "app.bcalm"
+            resValue("bool", "is_play", "false")
+        }
+        // Google Play build (uploaded as the AAB).
+        create("play") {
+            dimension = "dist"
+            applicationId = "io.github.dreamins.bcalm"
+            resValue("bool", "is_play", "true")
+        }
     }
 
     // Stable signing key from CI secrets so phone updates work; local builds keep the default debug key.

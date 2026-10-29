@@ -2198,9 +2198,13 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
         val info = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }
         val built = remember { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(info.lastUpdateTime) }
         Caption("Version ${info.versionName} · installed $built", Modifier.padding(start = 4.dp, top = 4.dp))
-        UpdateCheckRow(ctx, PackageInfoCompat.getLongVersionCode(info))
-        Caption("Updates are only checked when you tap the button; the app makes no other network calls.",
-            Modifier.padding(start = 4.dp, bottom = 48.dp))
+        if (!ctx.resources.getBoolean(R.bool.is_play)) {
+            UpdateCheckRow(ctx, PackageInfoCompat.getLongVersionCode(info))
+            Caption("Updates are only checked when you tap the button; the app makes no other network calls.",
+                Modifier.padding(start = 4.dp, bottom = 48.dp))
+        } else {
+            Spacer(Modifier.height(48.dp))
+        }
     }
 
     if (addingCause) {

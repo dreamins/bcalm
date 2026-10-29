@@ -4,7 +4,7 @@ set -euxo pipefail
 
 PKG=app.bcalm
 ACTIVITY=com.example.anxietytracker.MainActivity
-APK=app/build/outputs/apk/debug/app-debug.apk
+APK=app/build/outputs/apk/sideload/debug/app-sideload-debug.apk
 OUT=docs/screenshots
 WORK=$(mktemp -d)
 mkdir -p "$OUT"

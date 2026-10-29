@@ -17,7 +17,7 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleSideloadDebug
       - name: Capture screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
