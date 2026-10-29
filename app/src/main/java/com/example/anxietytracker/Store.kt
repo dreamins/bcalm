@@ -78,9 +78,21 @@ object Store {
     }
 
     // ---- settings ----
-    var intervalHours: Int
-        get() = prefs.getInt("intervalHours", 3)
-        set(v) { prefs.edit().putInt("intervalHours", v).apply() }
+    // ---- prompted check-ins: on/off, three windows (minutes of day), pause (epoch day prompts resume on; 0 = not paused) ----
+    var promptsOn: Boolean
+        get() = prefs.getBoolean("promptsOn", true)
+        set(v) { prefs.edit().putBoolean("promptsOn", v).apply() }
+    var promptsPausedUntil: Long
+        get() = prefs.getLong("promptsPausedUntil", 0L)
+        set(v) { prefs.edit().putLong("promptsPausedUntil", v).apply() }
+    var promptsMigrated: Boolean
+        get() = prefs.getBoolean("promptsMigrated", false)
+        set(v) { prefs.edit().putBoolean("promptsMigrated", v).apply() }
+    fun promptWindow(w: Int): Pair<Int, Int> =
+        prefs.getInt("promptStart$w", Prompts.DEFAULTS[w].first) to prefs.getInt("promptEnd$w", Prompts.DEFAULTS[w].second)
+    fun setPromptWindow(w: Int, start: Int, end: Int) {
+        prefs.edit().putInt("promptStart$w", start).putInt("promptEnd$w", end).apply()
+    }
 
     var chartView: Int  // 0 = time of day, 1 = since waking, 2 = over time
         get() = prefs.getInt("chartView3", 0)
@@ -336,6 +348,14 @@ object Store {
         upsertPrompt(p.copy(status = status, answeredTs = answeredTs ?: p.answeredTs))
     }
 
+    @Synchronized
+    fun removePrompt(id: String) {
+        if (_prompts.value.none { it.id == id }) return
+        _prompts.value = _prompts.value.filter { it.id != id }
+        writePrompts()
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
     /** Turns "pending" prompts scheduled more than 60 minutes before [now] into "expired". */
     @Synchronized
     fun expireStale(now: Long = System.currentTimeMillis()) {
@@ -427,22 +447,20 @@ object Store {
         BcalmWidget.refresh(appCtx)
     }
 
-    /** Saves the carried-over draft as a new entry and clears any reminder. */
+    /** Saves the carried-over draft as a new entry. */
     fun logDraft(ctx: Context): Entry {
         val e = entryFrom(loadDraft())
         add(e)
-        Reminders.cancelNotification(ctx)
         return e
     }
 
-    /** Widget tap: log [n] with all other values carried over (no causes); same path as "Same as last". */
+    /** Widget tap: log [n] with all other values carried over (no causes); same path as logDraft. */
     fun quickLog(ctx: Context, n: Int): Entry {
         val d = loadDraft().copy(anxiety = n)
         saveDraft(d)
         val ts = maxOf(System.currentTimeMillis(), (_entries.value.lastOrNull()?.ts ?: 0L) + 1)
         val e = entryFrom(d, emptyList(), ts)
         add(e)   // persists, enqueues CsvSync and refreshes the widget
-        Reminders.cancelNotification(ctx)
         return e
     }
 

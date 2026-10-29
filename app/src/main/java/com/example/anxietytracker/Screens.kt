@@ -4,7 +4,9 @@ package com.example.anxietytracker
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -111,9 +113,27 @@ private val CellShape = RoundedCornerShape(10.dp)
 // ---------------- App shell ----------------
 
 @Composable
-fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0) {
+fun AppScreen(vm: MainViewModel, onExport: () -> Unit, initialTab: Int = 0, promptId: String? = null, onPromptDone: () -> Unit = {}) {
     var tab by remember { mutableIntStateOf(initialTab.coerceIn(0, 3)) }
     val snack = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var promptOpen by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(promptId) {
+        val id = promptId ?: return@LaunchedEffect
+        val p = Store.prompts.value.firstOrNull { it.id == id }
+        if (p != null && p.status == PROMPT_PENDING && System.currentTimeMillis() - p.scheduledTs < Prompts.VALID_MS) promptOpen = id
+        else scope.launch { snack.showSnackbar("That check-in has expired") }
+        onPromptDone()
+    }
+    promptOpen?.let { id ->
+        PromptSheet(onClose = { promptOpen = null }) { n, details ->
+            promptOpen = null
+            if (vm.answerPrompt(id, n) != null) {
+                if (details) tab = 0
+                scope.launch { snack.currentSnackbarData?.dismiss(); snack.showSnackbar("Saved") }
+            }
+        }
+    }
     val t = MaterialTheme.bcalm
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
@@ -352,6 +372,30 @@ private val PeopleIcon: ImageVector by lazy {
 private fun boolToIdx(b: Boolean?): Int? = b?.let { if (it) 0 else 1 }
 private fun idxToBool(i: Int?): Boolean? = i?.let { it == 0 }
 private val YES_NO = listOf("Yes", "No")
+
+/** One-tap check-in sheet: tapping a number saves it; "Add details" first makes the save open the Log tab on that entry. */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun PromptSheet(onClose: () -> Unit, onPick: (Int, Boolean) -> Unit) {
+    val t = MaterialTheme.bcalm
+    val haptic = LocalHapticFeedback.current
+    var details by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = t.card) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("How's your anxiety right now?", style = MaterialTheme.typography.titleLarge)
+            ScaleRow(10, null, height = 46.dp, gap = 4.dp, allowClear = false) { i ->
+                if (i != null) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPick(i + 1, details) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Caption("Calm"); Caption("Overwhelmed")
+            }
+            TextButton(onClick = { details = !details }) {
+                Text(if (details) "Add details after saving \u2713" else "Add details")
+            }
+        }
+    }
+}
 
 // ---------------- Log ----------------
 
@@ -1426,7 +1470,13 @@ private fun SettingsSection(title: String, hint: String? = null, content: @Compo
 fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    var hours by remember { mutableIntStateOf(Store.intervalHours) }
+    var promptsOn by remember { mutableStateOf(Store.promptsOn) }
+    var pausedUntil by remember { mutableLongStateOf(Store.promptsPausedUntil) }
+    val windows = remember { mutableStateListOf(*Array(Prompts.WINDOWS) { Store.promptWindow(it) }) }
+    var editWin by remember { mutableStateOf<Int?>(null) }
+    var editStart by remember { mutableStateOf<Int?>(null) }
+    var pauseMenu by remember { mutableStateOf(false) }
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     var medName by remember { mutableStateOf(Store.medName) }
     val causeList by vm.causeList.collectAsStateWithLifecycle()
     var addingCause by remember { mutableStateOf(false) }
@@ -1462,7 +1512,9 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
                     if (list == null) "Not a valid CSV (no timestamp column)"
                     else Store.importEntries(list).let { n ->
                         val k = Store.restoreCauses(list)
-                        val c = Store.restoreSettings(Csv.parseSettings(text))
+                        val cs0 = Csv.parseSettings(text)
+                        val c = Store.restoreSettings(cs0)
+                        Store.mergeFromFile(emptyList(), CsvSettings(prompts = cs0.prompts))   // prompts only: merge like a sync file
                         "Imported $n entries (${list.size - n} skipped)" + (if (k > 0) ", $k causes restored" else "") +
                             if (c > 0) ", $c calm cards restored" else ""
                     }
@@ -1471,22 +1523,57 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
             android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
         }
     }
-    val intervals = listOf(0, 2, 3, 4)
+    fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(Modifier.padding(horizontal = 4.dp)) { ScreenTitle("Settings") }
 
-        SettingsSection("Reminders",
-            "A gentle nudge between 08:00 and 22:00. It clears itself after 30 minutes.") {
-            LabeledRow("Remind me every") {
-                Segmented(listOf("Off", "2h", "3h", "4h"), intervals.indexOf(hours),
-                    Modifier.width(200.dp), allowClear = false) { i ->
-                    if (i != null) {
-                        val v = intervals[i]
-                        hours = v; Store.intervalHours = v; Reminders.schedule(ctx, v, replace = true)
+        SettingsSection("Check-ins",
+            "One notification at a random time in each window. Rate in one tap; these samples show your typical day, not just the hard moments.") {
+            LabeledRow("Random check-ins (3 a day)") {
+                Switch(checked = promptsOn, onCheckedChange = { v ->
+                    promptsOn = v; Store.promptsOn = v
+                    if (v && Build.VERSION.SDK_INT >= 33 && !Prompts.canNotify(ctx)) notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    Prompts.plan(ctx)
+                })
+            }
+            if (promptsOn) {
+                for (w in 0 until Prompts.WINDOWS) {
+                    val (ws, we) = windows[w]
+                    LabeledRow(Prompts.NAMES[w]) {
+                        TextButton(onClick = { editWin = w; editStart = null; android.widget.Toast.makeText(ctx, "Set the start time", android.widget.Toast.LENGTH_SHORT).show() }) { Text("${hm(ws)}–${hm(we)}") }
+                    }
+                }
+                val paused = pausedUntil > Store.today()
+                LabeledRow(if (paused) "Paused until " + LocalDate.ofEpochDay(pausedUntil).format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) else "Pause") {
+                    if (paused) TextButton(onClick = { pausedUntil = 0L; Store.promptsPausedUntil = 0L; Prompts.plan(ctx) }) { Text("Resume") }
+                    else Box {
+                        TextButton(onClick = { pauseMenu = true }) { Text("Pause for…") }
+                        DropdownMenu(expanded = pauseMenu, onDismissRequest = { pauseMenu = false }) {
+                            listOf(1, 3, 7).forEach { n ->
+                                DropdownMenuItem(text = { Text(if (n == 1) "1 day" else "$n days") }, onClick = {
+                                    pauseMenu = false
+                                    pausedUntil = Store.today() + n; Store.promptsPausedUntil = pausedUntil; Prompts.plan(ctx)
+                                })
+                            }
+                        }
                     }
                 }
             }
+        }
+        editWin?.let { w ->
+            val (ws, we) = windows[w]
+            val first = editStart == null
+            key(first) { TimeDialog(if (first) ws else we, { editWin = null }) { m ->
+                if (first) { editStart = m; android.widget.Toast.makeText(ctx, "Now set the end time", android.widget.Toast.LENGTH_SHORT).show(); return@TimeDialog }
+                val st = editStart!!
+                if (m - st < 30) {
+                    android.widget.Toast.makeText(ctx, "End must be at least 30 minutes after start", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    windows[w] = st to m; Store.setPromptWindow(w, st, m); editWin = null
+                    Prompts.plan(ctx, reroll = true)
+                }
+            } }
         }
 
         SettingsSection("Medication",

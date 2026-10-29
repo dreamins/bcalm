@@ -20,11 +20,25 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 
 class MainActivity : ComponentActivity() {
+    /** Check-in opened from its notification; shown as the one-tap sheet until answered or dismissed. */
+    private var promptId by mutableStateOf<String?>(null)
+
+    private fun takePrompt(i: Intent?) {
+        i?.getStringExtra(Prompts.EXTRA_ID)?.let { promptId = it; i.removeExtra(Prompts.EXTRA_ID) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takePrompt(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Store.init(this)
-        Reminders.schedule(this, Store.intervalHours, replace = false)
+        Prompts.migrate(this)
+        if (savedInstanceState == null) takePrompt(intent)
         setContent {
             val dark = isSystemInDarkTheme()
             val ctx = LocalContext.current
@@ -35,9 +49,10 @@ class MainActivity : ComponentActivity() {
                     if (Build.VERSION.SDK_INT >= 33) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
                 val vm: MainViewModel = viewModel()
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh(); CsvSync.enqueueIfEnabled(ctx) }   // also picks up outside edits of the sync file
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh(); Prompts.plan(ctx); CsvSync.enqueueIfEnabled(ctx) }   // also picks up outside edits of the sync file
                 LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.onAppStopped() }
-                AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0))
+                AppScreen(vm, onExport = { exportCsv() }, initialTab = intent.getIntExtra("tab", 0),
+                    promptId = promptId, onPromptDone = { promptId = null })
             }
         }
     }

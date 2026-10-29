@@ -139,7 +139,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun commit(e: Entry) {
         Store.update(e)
-        Reminders.cancelNotification(getApplication())
         arm(e)
     }
 
@@ -154,7 +153,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (liveActive() != null) { syncActive(); return }
         val e = Store.entryFrom(_draft.value.copy(anxiety = null), orderedCauses(), newTs())
         Store.add(e)
-        Reminders.cancelNotification(getApplication())
         arm(e)
         _logEvents.tryEmit(LogResult("Logged without anxiety level") {
             Store.delete(e)
@@ -189,7 +187,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .copy(after = a?.after, tools = a?.tools ?: emptyList(), source = a?.source ?: SOURCE_MANUAL, promptId = a?.promptId)
         if (a == null) {
             Store.add(e)
-            Reminders.cancelNotification(getApplication())
             arm(e)
             return LogResult("Logged $n") {
                 Store.delete(e)
@@ -207,6 +204,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * One-tap answer to check-in [id] with [n]: logs a new entry from the current draft (daily fields carried over, no causes)
+     * marked as prompted, marks the prompt answered and leaves the entry open for edits like a manual log.
+     * Returns null if the prompt is no longer pending.
+     */
+    fun answerPrompt(id: String, n: Int): Entry? {
+        val p = Store.prompts.value.firstOrNull { it.id == id } ?: return null
+        if (p.status != PROMPT_PENDING) return null
+        val d = _draft.value.copy(anxiety = n)
+        _draft.value = d
+        Store.saveDraft(d)
+        _causes.value = emptySet()
+        val e = Store.entryFrom(d, emptyList(), newTs()).copy(source = SOURCE_PROMPTED, promptId = id)
+        Store.add(e)
+        Store.setPromptStatus(id, PROMPT_ANSWERED, System.currentTimeMillis())
+        Prompts.cancelNotification(getApplication(), p.window)
+        arm(e)
+        return e
+    }
+
+    /**
      * A joy number was tapped (1..5). With an open entry it sets that entry's joy (the same number again clears it);
      * otherwise it logs a new entry with joy and no anxiety. Joy is never part of the carried-over draft.
      */
@@ -215,7 +232,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (a == null) {
             val e = Store.entryFrom(_draft.value.copy(anxiety = null), orderedCauses(), newTs(), joy = n)
             Store.add(e)
-            Reminders.cancelNotification(getApplication())
             arm(e)
             return LogResult("Logged joy $n") {
                 Store.delete(e)
