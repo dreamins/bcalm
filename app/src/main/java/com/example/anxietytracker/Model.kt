@@ -126,9 +126,14 @@ data class CauseCard(val thought: String = "", val todo: String = "", val heavy:
 /** Support settings keys, in CSV order. */
 val SUPPORT_KEYS = listOf("crisisLabel", "crisisNumber", "personLabel", "personNumber", "customStep")
 
+/** Medication settings keys, in CSV order. */
+val MED_KEYS = listOf("name", "unit", "usualTime", "dose")
+
 /** Calm cards and support contacts, carried in the CSV as '#' rows after the entries. */
 data class CsvSettings(val cards: Map<String, CauseCard> = emptyMap(), val support: Map<String, String> = emptyMap(),
-                       val prompts: List<PromptRec> = emptyList())
+                       val prompts: List<PromptRec> = emptyList(),
+                       /** Medication settings: name, unit, usualTime (HH:mm), dose; only keys that are set. */
+                       val med: Map<String, String> = emptyMap())
 
 /** UTC offset in minutes of the device zone at [ts]. */
 fun localOffsetMin(ts: Long): Int =
@@ -235,6 +240,7 @@ object Csv {
         for ((name, c) in settings.cards)
             append("#card,${enc(name)},${enc(c.thought)},${enc(c.todo)},${if (c.heavy) "1" else "0"}\n")
         for (k in SUPPORT_KEYS) settings.support[k]?.let { append("#support,$k,${enc(it)}\n") }
+        for (k in MED_KEYS) settings.med[k]?.let { append("#med,$k,${enc(it)}\n") }
     }
 
     private val PCT = Regex("%[0-9A-Fa-f]{2}")
@@ -289,6 +295,7 @@ object Csv {
         val cards = LinkedHashMap<String, CauseCard>()
         val support = LinkedHashMap<String, String>()
         val prompts = LinkedHashMap<String, PromptRec>()
+        val med = LinkedHashMap<String, String>()
         for (line in text.removePrefix("\uFEFF").lines().map { it.trim() }) {
             if (!line.startsWith("#")) continue
             val f = splitHash(line)
@@ -309,9 +316,10 @@ object Csv {
                     }
                 }
                 "#support" -> if (f.size >= 3 && f[1].first in SUPPORT_KEYS) support[f[1].first] = v(2)
+                "#med" -> if (f.size >= 3 && f[1].first in MED_KEYS) med[f[1].first] = v(2)
             }
         }
-        return CsvSettings(cards, support, prompts.values.toList())
+        return CsvSettings(cards, support, prompts.values.toList(), med)
     }
 
     /** Parses [build] output (any historical column set, matched by header name); null if no timestamp column. */

@@ -1971,7 +1971,6 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     var editStart by remember { mutableStateOf<Int?>(null) }
     var pauseMenu by remember { mutableStateOf(false) }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    var medName by remember { mutableStateOf(Store.medName) }
     val causeList by vm.causeList.collectAsStateWithLifecycle()
     var addingCause by remember { mutableStateOf(false) }
     var removingCause by remember { mutableStateOf<String?>(null) }
@@ -1983,10 +1982,11 @@ fun SettingsScreen(vm: MainViewModel, onExport: () -> Unit) {
     var personLabel by remember(supportVer) { mutableStateOf(Store.personLabel) }
     var personNumber by remember(supportVer) { mutableStateOf(Store.personNumber) }
     var customStep by remember(supportVer) { mutableStateOf(Store.customStep) }
-    var unit by remember { mutableStateOf(Store.medUnit) }
+    var medName by remember(supportVer) { mutableStateOf(Store.medName) }
+    var unit by remember(supportVer) { mutableStateOf(Store.medUnit) }
     var unitMenu by remember { mutableStateOf(false) }
-    var doseText by remember { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }
-    var usualTime by remember { mutableStateOf(Store.medUsualTime) }
+    var doseText by remember(supportVer) { mutableStateOf(Store.medDose.value?.let { fmtNum(it) } ?: "") }
+    var usualTime by remember(supportVer) { mutableStateOf(Store.medUsualTime) }
     var showTime by remember { mutableStateOf(false) }
     val syncUri by Store.syncUri.collectAsStateWithLifecycle()
     val syncState by Store.syncState.collectAsStateWithLifecycle()

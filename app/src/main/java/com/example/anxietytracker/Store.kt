@@ -137,21 +137,85 @@ object Store {
     // ---- medication: name/unit/usual time set in Settings; dose picked on the Log screen ----
     var medName: String
         get() = prefs.getString("medName", "") ?: ""
-        set(v) { prefs.edit().putString("medName", clean(v)).apply() }
+        set(v) { prefs.edit().putString("medName", clean(v)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
     var medUnit: String
         get() = normalizeMedUnit(prefs.getString("medUnit", null))
-        set(v) { prefs.edit().putString("medUnit", normalizeMedUnit(v)).apply() }
+        set(v) { prefs.edit().putString("medUnit", normalizeMedUnit(v)).apply(); CsvSync.enqueueIfEnabled(appCtx) }
     /** Usual time taken, minutes since midnight (null = none). */
     var medUsualTime: Int?
         get() = if (prefs.contains("medUsualTime")) prefs.getInt("medUsualTime", 0) else null
-        set(v) { prefs.edit().apply { if (v == null) remove("medUsualTime") else putInt("medUsualTime", v) }.apply() }
+        set(v) { prefs.edit().apply { if (v == null) remove("medUsualTime") else putInt("medUsualTime", v) }.apply(); CsvSync.enqueueIfEnabled(appCtx) }
 
     /** Current dose (null = none). Carries over day to day until changed; recorded with every entry. */
     private val _medDose = MutableStateFlow<Double?>(null)
     val medDose: StateFlow<Double?> = _medDose
     fun setMedDose(v: Double?) {
+        storeMedDose(v)
+        CsvSync.enqueueIfEnabled(appCtx)
+    }
+
+    private fun storeMedDose(v: Double?) {
         _medDose.value = v
         prefs.edit().apply { if (v == null) remove("medDoseNum") else putString("medDoseNum", fmtNum(v)) }.apply()
+    }
+
+    /** Medication settings for the CSV ('#med' rows); unset values are omitted. */
+    private fun medCsv(): Map<String, String> = buildMap {
+        medName.takeIf { it.isNotBlank() }?.let { put("name", it) }
+        if (prefs.contains("medUnit") || _medDose.value != null) put("unit", medUnit)
+        medUsualTime?.let { put("usualTime", fmtMin(it)) }
+        _medDose.value?.let { put("dose", fmtNum(it)) }
+    }
+
+    /**
+     * Applies one '#med' value (same normalization as the setters, never enqueues a sync).
+     * With [onlyIfUnset] a value already set locally is kept. Returns true if it changed.
+     */
+    private fun applyMed(key: String, raw: String, onlyIfUnset: Boolean): Boolean {
+        when (key) {
+            "name" -> {
+                val nv = clean(raw)
+                if (nv.isEmpty() || (onlyIfUnset && medName.isNotBlank()) || medName == nv) return false
+                prefs.edit().putString("medName", nv).apply()
+            }
+            "unit" -> {
+                val nv = normalizeMedUnit(raw)
+                val isSet = prefs.contains("medUnit")
+                if ((onlyIfUnset && isSet) || (isSet && medUnit == nv)) return false
+                prefs.edit().putString("medUnit", nv).apply()
+            }
+            "usualTime" -> {
+                val parts = raw.trim().split(":")
+                val h = parts.getOrNull(0)?.toIntOrNull() ?: return false
+                val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                val nv = (h * 60 + m).takeIf { h in 0..23 && m in 0..59 } ?: return false
+                if ((onlyIfUnset && medUsualTime != null) || medUsualTime == nv) return false
+                prefs.edit().putInt("medUsualTime", nv).apply()
+            }
+            "dose" -> {
+                val nv = raw.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 } ?: return false
+                if ((onlyIfUnset && _medDose.value != null) || _medDose.value == nv) return false
+                storeMedDose(nv)
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    /** Old CSVs have no '#med' rows: fill any still-unset medication setting from the most recent entries. */
+    private fun fillMedFromEntries(): Boolean {
+        var changed = false
+        val es = _entries.value
+        val e = es.filter { it.medName != null || it.medUnit != null || it.medDose != null }.maxByOrNull { it.ts }
+        if (e != null) {
+            e.medName?.let { if (applyMed("name", it, true)) changed = true }
+            e.medUnit?.let { if (applyMed("unit", it, true)) changed = true }
+            e.medDose?.let { if (applyMed("dose", fmtNum(it), true)) changed = true }
+        }
+        es.filter { it.medTime != null }.maxByOrNull { it.ts }?.medTime?.let {
+            if (applyMed("usualTime", fmtMin(it), true)) changed = true
+        }
+        return changed
     }
 
     /** Earlier versions kept free-text doses ("10 mg") in Settings; turn the current one into number + unit. */
@@ -257,7 +321,7 @@ object Store {
 
     /** Cards and support values for the CSV; defaults (and blanks) are included so a cleared field restores as cleared. */
     fun csvSettings() = CsvSettings(_cards.value, mapOf("crisisLabel" to crisisLabel, "crisisNumber" to crisisNumber,
-        "personLabel" to personLabel, "personNumber" to personNumber, "customStep" to customStep), _prompts.value)
+        "personLabel" to personLabel, "personNumber" to personNumber, "customStep" to customStep), _prompts.value, medCsv())
 
     /**
      * Restores cards and support values from an imported CSV without overwriting local edits:
@@ -275,10 +339,14 @@ object Store {
         s.support["personLabel"]?.takeIf { personLabel.isBlank() }?.let { personLabel = it }
         s.support["personNumber"]?.takeIf { personNumber.isBlank() }?.let { personNumber = it }
         s.support["customStep"]?.takeIf { customStep.isBlank() }?.let { customStep = it }
+        var medChanged = false
+        for ((k, v) in s.med) if (applyMed(k, v, true)) medChanged = true
+        if (s.med.isEmpty() && fillMedFromEntries()) medChanged = true   // old CSV without '#med' rows
+        if (medChanged) { _supportVersion.value += 1; CsvSync.enqueueIfEnabled(appCtx) }
         return n
     }
 
-    /** Bumped when a sync merge changes the support fields, so Settings can reload them. */
+    /** Bumped when a merge/restore changes the support or medication fields, so Settings can reload them. */
     private val _supportVersion = MutableStateFlow(0)
     val supportVersion: StateFlow<Int> = _supportVersion
 
@@ -288,7 +356,7 @@ object Store {
     /**
      * Merges a sync file edited elsewhere into local data; the file wins. Entries match by timestamp second
      * (the CSV has no milliseconds): unknown ones are added, differing ones replaced (local ts kept). Cards in the
-     * file overwrite local ones (cause added if missing); support fields present in the file overwrite local ones.
+     * file overwrite local ones (cause added if missing); support and medication fields present in the file overwrite local ones.
      * Local-only data is kept. Does not enqueue a sync. Returns true if anything changed.
      */
     @Synchronized
@@ -340,6 +408,10 @@ object Store {
             if (cur != nv) { prefs.edit().putString(k, nv).apply(); supportChanged = true }
         }
         if (supportChanged) { _supportVersion.value += 1; changed = true }
+        var medChanged = false
+        for ((k, v) in s.med) if (applyMed(k, v, false)) medChanged = true
+        if (s.med.isEmpty() && list.isNotEmpty() && fillMedFromEntries()) medChanged = true   // old file without '#med' rows
+        if (medChanged) { _supportVersion.value += 1; changed = true }
         return changed
     }
 
