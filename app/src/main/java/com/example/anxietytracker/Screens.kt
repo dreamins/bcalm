@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -536,7 +537,9 @@ fun LogScreen(vm: MainViewModel, snack: SnackbarHostState) {
     }
 
     val anyDailyUnset = d.wakeMin == null || d.sleep == null || d.exercise == null
-    val todayExpanded = todayOpen ?: anyDailyUnset
+    var autoExpanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(anyDailyUnset) { if (anyDailyUnset) autoExpanded = true }
+    val todayExpanded = todayOpen ?: (anyDailyUnset || autoExpanded)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         .padding(horizontal = 16.dp, vertical = 16.dp),
