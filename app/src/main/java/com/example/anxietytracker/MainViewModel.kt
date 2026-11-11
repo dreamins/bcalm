@@ -239,11 +239,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Highest manual rating >= 5 in the 8 h before [e] when [e] is at least 2 below it, else null ("what helped?" trigger). */
+    /**
+     * Highest manual rating >= 5 in the 8 h before [e] when [e] is at least 2 below it AND strictly lower than the
+     * most recent manual rating in that window (so a rise after the drop, e.g. 8, 3, then 6, does not count), else null
+     * ("what helped?" trigger).
+     */
     fun spikeBefore(e: Entry): Int? {
         val a = e.anxiety ?: return null
-        val sp = Store.entries.value.filter { it.isManual() && it.ts < e.ts && e.ts - it.ts <= 8 * 3_600_000L && (it.anxiety ?: 0) >= 5 }
-            .maxOfOrNull { it.anxiety!! } ?: return null
+        val prior = Store.entries.value.filter { it.isManual() && it.ts < e.ts && e.ts - it.ts <= 8 * 3_600_000L && it.anxiety != null }
+        val sp = prior.filter { it.anxiety!! >= 5 }.maxOfOrNull { it.anxiety!! } ?: return null
+        val last = prior.maxByOrNull { it.ts }?.anxiety
+        if (last != null && a >= last) return null
         return sp.takeIf { a <= it - 2 }
     }
 
