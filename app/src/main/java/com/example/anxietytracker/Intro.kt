@@ -26,7 +26,7 @@ private val introLines = listOf(
     "Log as much or as little as you like.",
     "The more you log, the clearer the patterns get.",
     "One tap is plenty. Missed a day? That's fine.",
-    "When we check in, it's just to see how you are — answer or don't.",
+    "When we check in, it's just to see how you are. Answer or don't.",
     "Nothing here keeps count of how often you show up.",
     "It's meant to make things a little lighter.",
 )
