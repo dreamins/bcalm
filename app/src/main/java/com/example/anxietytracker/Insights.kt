@@ -6,6 +6,7 @@ import kotlin.math.abs
 fun percentile(values: List<Int>, p: Double): Double = percentile(values.map { it.toDouble() }, p)
 
 /** Same as the Int overload, for real-valued [values]. */
+@JvmName("percentileOfDoubles")
 fun percentile(values: List<Double>, p: Double): Double {
     if (values.isEmpty()) return 0.0
     val s = values.sorted()
