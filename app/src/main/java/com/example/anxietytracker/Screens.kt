@@ -1251,24 +1251,26 @@ fun ChartScreen(vm: MainViewModel) {
         RecoveryCard(recovery, curve.halfLife, curve.halfLifeFits, checkins.followAnswered, checkins.followTotal)
 
         val cp = curve.patterns
-        val pCauses = if (showModeled) cp.causes.map { Triple(it.label, "%.1f h · %s".format(it.hours, if (it.days == 1) "1 day" else "${it.days} days"), it.diff) }
-            else ins.causes.map { Triple(it.label, if (it.days == 1) "1 day" else "${it.days} days", it.diff) }
+        val pCauses = if (showModeled) cp.causes.map { PatternItem(it.label, "%.1f h · %s".format(it.hours, if (it.days == 1) "1 day" else "${it.days} days"), it.diff, it.spread) }
+            else ins.causes.map { PatternItem(it.label, if (it.days == 1) "1 day" else "${it.days} days", it.diff, it.spread) }
         val pFactors = if (showModeled) cp.factors else ins.factors
         val pOther = if (showModeled) cp.otherCauses else ins.otherCauses
         if (pCauses.isNotEmpty() || pFactors.isNotEmpty() || pOther > 0) {
             SectionCard(spacing = 0.dp) {
                 CardHeader("Patterns")
                 Spacer(Modifier.height(6.dp))
-                val rows: List<Triple<String, String?, Double>> = pCauses.map { Triple(it.first, it.second as String?, it.third) } +
-                    pFactors.map { Triple(it.label, null as String?, it.diff) }
-                rows.forEachIndexed { i, r -> PatternRow(r.first, r.second, r.third, divider = i < rows.lastIndex) }
+                val rows = pCauses + pFactors.map { PatternItem(it.label, null, it.diff, it.spread) }
+                val lim = kotlin.math.ceil(2 * maxOf(1.0, rows.filter { it.spread.size >= 3 }.maxOfOrNull {
+                    maxOf(kotlin.math.abs(percentile(it.spread, 10.0)), kotlin.math.abs(percentile(it.spread, 90.0)))
+                } ?: 0.0)) / 2
+                rows.forEachIndexed { i, r -> PatternRow(r, lim, divider = i < rows.lastIndex) }
                 if (pOther > 0) {
                     Caption(if (pOther == 1) "1 other cause on too few days"
                             else "$pOther other causes on too few days",
                         Modifier.padding(top = 8.dp))
                 }
-                Caption(if (showModeled) "From the modeled curve: time attributed to each cause compared with the rest of that day, each day counted once. Factors: time with vs without."
-                        else "Causes: average anxiety compared with the rest of the same day, each day counted once. Factors: compared with the opposite case.",
+                Caption(if (showModeled) "From the modeled curve: time attributed to each cause compared with the rest of that day, each day counted once. Factors: time with vs without. $PATTERN_BARS_NOTE"
+                        else "Causes: average anxiety compared with the rest of the same day, each day counted once. Factors: compared with the opposite case. $PATTERN_BARS_NOTE",
                     Modifier.padding(top = 6.dp))
             }
         }
@@ -1505,12 +1507,34 @@ private fun SweatRowView(label: String, value: String?, divider: Boolean = true)
     if (divider) HorizontalDivider(color = t.innerDivider)
 }
 
+private const val PATTERN_BARS_NOTE =
+    "Bars: box = middle half, whiskers = 10th–90th percentile, tick = median; center line is no difference."
+
+/** One Patterns row: [diff] is the mean difference, [spread] its distribution (empty = no bar). */
+private data class PatternItem(val label: String, val count: String?, val diff: Double, val spread: List<Double>)
+
+/** Row label, optional [PatternItem.count], a percentile candle on the shared symmetric scale ±[lim], and the mean difference. */
 @Composable
-private fun PatternRow(label: String, count: String?, diff: Double, divider: Boolean) {
+private fun PatternRow(item: PatternItem, lim: Double, divider: Boolean) {
     val t = MaterialTheme.bcalm
+    val (label, count, diff, spread) = item
     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (count != null) Text(count, Modifier.padding(end = 10.dp), fontSize = 12.sp, color = t.secondary)
+        Canvas(Modifier.padding(end = 10.dp).size(84.dp, 20.dp)) {
+            if (spread.size < 3) return@Canvas
+            val cy = size.height / 2
+            fun x(v: Double) = ((v.coerceIn(-lim, lim) / lim + 1) / 2 * size.width).toFloat()
+            val p10 = x(percentile(spread, 10.0)); val p25 = x(percentile(spread, 25.0))
+            val med = percentile(spread, 50.0)
+            val p75 = x(percentile(spread, 75.0)); val p90 = x(percentile(spread, 90.0))
+            val c = if (med > 0) t.high else t.low
+            drawLine(t.innerDivider, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.dp.toPx())
+            drawLine(c, Offset(p10, cy), Offset(p90, cy), 1.5.dp.toPx(), StrokeCap.Round)
+            val bh = 8.dp.toPx()
+            drawRoundRect(c.copy(alpha = 0.35f), Offset(p25, cy - bh / 2), Size(maxOf(p75 - p25, 1f), bh), CornerRadius(2.dp.toPx()))
+            drawLine(c, Offset(x(med), cy - bh / 2), Offset(x(med), cy + bh / 2), 2.dp.toPx())
+        }
         Text(fmtDiff(diff), Modifier.widthIn(min = 44.dp), textAlign = TextAlign.End,
             fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }

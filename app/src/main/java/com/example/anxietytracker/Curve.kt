@@ -33,7 +33,7 @@ class HardSlot(val cover: Int, val above: Int)
 class HardBest(val totalDays: Int, val start: Int, val k: Int, val n: Int, val maxHour: Int)
 
 /** Cause row of the modeled patterns: [hours] attributed to [label] over [days] days, [diff] vs the rest of those days. */
-class CurveCause(val label: String, val hours: Double, val days: Int, val diff: Double)
+class CurveCause(val label: String, val hours: Double, val days: Int, val diff: Double, val spread: List<Double> = emptyList())
 
 /** Patterns read off the curve: [causes] (>= 3 days, sorted by diff), [otherCauses] on too few days, [factors]. */
 class CurvePatterns(val causes: List<CurveCause>, val otherCauses: Int, val factors: List<DiffRow>)
@@ -318,7 +318,7 @@ private fun curvePatterns(es: Map<LocalDate, List<Entry>>, gp: Map<LocalDate, Li
             n += sel.size
             perDay += sel.map { it.v }.average() - dm.getValue(d)
         }
-        if (perDay.size >= 3) rows += CurveCause(c, n * CURVE_STEP / 60.0, perDay.size, perDay.average())
+        if (perDay.size >= 3) rows += CurveCause(c, n * CURVE_STEP / 60.0, perDay.size, perDay.average(), perDay)
     }
 
     val byDay = all.groupBy { it.dateTime.toLocalDate() }
@@ -348,7 +348,7 @@ private fun curvePatterns(es: Map<LocalDate, List<Entry>>, gp: Map<LocalDate, Li
             if (a.isNotEmpty()) yes += a.average()
             if (b.isNotEmpty()) no += b.average()
         }
-        return if (yes.size >= 3 && no.size >= 3) DiffRow(label, yes.size + no.size, yes.average() - no.average()) else null
+        return if (yes.size >= 3 && no.size >= 3) DiffRow(label, yes.size + no.size, yes.average() - no.average(), spread = yes.map { it - no.average() }) else null
     }
     fun entryFlag(pick: (Entry) -> Boolean?): (LocalDate, List<Entry>, Int) -> Boolean? = { _, de, k -> if (k < 0) null else pick(de[k]) }
     fun dayLevel(m: Map<LocalDate, Boolean>, shift: Long = 0): (LocalDate, List<Entry>, Int) -> Boolean? = { d, _, _ -> m[d.minusDays(shift)] }

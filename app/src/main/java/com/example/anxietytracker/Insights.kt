@@ -3,7 +3,10 @@ package com.example.anxietytracker
 import kotlin.math.abs
 
 /** Linear-interpolated percentile ([p] in 0..100) of [values]; 0.0 when empty. */
-fun percentile(values: List<Int>, p: Double): Double {
+fun percentile(values: List<Int>, p: Double): Double = percentile(values.map { it.toDouble() }, p)
+
+/** Same as the Int overload, for real-valued [values]. */
+fun percentile(values: List<Double>, p: Double): Double {
     if (values.isEmpty()) return 0.0
     val s = values.sorted()
     val pos = (p / 100.0) * (s.size - 1)
@@ -12,8 +15,8 @@ fun percentile(values: List<Int>, p: Double): Double {
     return s[lo] + (s[hi] - s[lo]) * (pos - lo)
 }
 
-/** One comparison row: [diff] is the mean anxiety difference (positive = higher anxiety). */
-data class DiffRow(val label: String, val n: Int, val diff: Double, val days: Int = 0)
+/** One comparison row: [diff] is the mean anxiety difference (positive = higher anxiety); [spread] its distribution (mean = [diff]). */
+data class DiffRow(val label: String, val n: Int, val diff: Double, val days: Int = 0, val spread: List<Double> = emptyList())
 
 data class Insights(
     val count: Int,
@@ -92,14 +95,14 @@ fun computeInsights(all: List<Entry>): Insights {
     val causeRows = byCause.mapNotNull { (c, es) ->
         val perDay = es.groupBy { it.dateTime.toLocalDate() }
             .map { (d, l) -> l.map { it.anxiety!! - dayMean.getValue(d) }.average() }
-        if (perDay.size >= 3) DiffRow(c, es.size, perDay.average(), perDay.size) else null
+        if (perDay.size >= 3) DiffRow(c, es.size, perDay.average(), perDay.size, perDay) else null
     }
     val causes = causeRows.sortedByDescending { it.diff }
     val other = byCause.size - causeRows.size
 
     fun vals(p: (Entry) -> Boolean): List<Int> = data.filter(p).map { it.anxiety!! }
     fun cmp(label: String, a: List<Int>, b: List<Int>): DiffRow? =
-        if (a.size >= 3 && b.size >= 3) DiffRow(label, a.size + b.size, a.average() - b.average()) else null
+        if (a.size >= 3 && b.size >= 3) DiffRow(label, a.size + b.size, a.average() - b.average(), spread = a.map { it - b.average() }) else null
 
     // Day-level alcohol/cannabis: latest answered entry of each calendar day.
     fun dayFlag(pick: (Entry) -> Boolean?): Map<Long, Boolean> =
