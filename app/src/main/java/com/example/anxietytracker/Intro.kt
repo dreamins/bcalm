@@ -24,11 +24,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 private val introLines = listOf(
     "Hi. Take a breath.",
     "Log as much or as little as you like.",
-    "The more you log, the more you'll understand — but none of it is required.",
+    "The more you log, the clearer the patterns get.",
     "One tap is plenty. Missed a day? That's fine.",
     "When we check in, it's just to see how you are — answer or don't.",
-    "No streaks. No scores. No pressure.",
-    "This is here to help, not to add one more thing to worry about.",
+    "Nothing here keeps count of how often you show up.",
+    "It's meant to make things a little lighter.",
 )
 private const val UPDATE_LINE = "A few gentle changes: random check-ins and soft follow-ups, so the calm moments count too."
 
